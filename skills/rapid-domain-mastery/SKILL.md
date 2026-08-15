@@ -129,6 +129,11 @@ python3 "$SKILL_DIR/scripts/session.py" save-task-feedback --session .rdm --id t
 python3 "$SKILL_DIR/scripts/session.py" reveal-task-feedback --session .rdm --id t01
 ```
 
+这里有两条额外约束：
+
+- `shared/runtime-feedback/` 里的环境反馈即时可见，不走 reveal 屏障。
+- 但教练反馈必须建立在当前轮已经跑过 `run-check` 的结果上；学生重提产物后，要重新跑检查。
+
 ### Phase 3：边界探索与迁移验证
 
 让学生先完成反事实推演、跨领域迁移、最小可行解释和未知问题生成，再解锁教练对因果链条和迁移边界的检查。

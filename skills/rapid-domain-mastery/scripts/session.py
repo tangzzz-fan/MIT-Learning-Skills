@@ -614,11 +614,16 @@ def submit_artifact(
     if round_entry is None:
         round_entry = {"round": round_no}
         rounds.append(round_entry)
+    previous_runtime_feedback = round_entry.get("runtime_feedback_file")
     round_entry["artifact_file"] = str(dest.relative_to(session))
     round_entry["submitted_at"] = utcnow()
-    round_entry.setdefault("runtime_feedback_file", None)
-    round_entry.setdefault("runtime_exit_code", None)
-    round_entry.setdefault("runtime_ran_at", None)
+    if previous_runtime_feedback:
+        feedback_path = session / previous_runtime_feedback
+        if feedback_path.exists():
+            feedback_path.unlink()
+    round_entry["runtime_feedback_file"] = None
+    round_entry["runtime_exit_code"] = None
+    round_entry["runtime_ran_at"] = None
     round_entry.setdefault("locked_feedback_file", None)
     round_entry.setdefault("revealed_feedback_file", None)
     round_entry["revealed"] = False
@@ -804,6 +809,10 @@ def save_task_feedback(
             break
     if round_entry is None or not round_entry.get("artifact_file"):
         raise SessionError(f"task {task_id} round {round_no} has no recorded artifact")
+    if not round_entry.get("runtime_feedback_file"):
+        raise SessionError(
+            f"task {task_id} round {round_no} has no runtime feedback yet; run-check before saving coach feedback"
+        )
 
     dest = _question_locked_feedback_path(session, task_id, round_no)
     _write_or_copy(dest, text=text, source=source, label="feedback")
@@ -899,6 +908,15 @@ def finish_phase(session: Path, phase: int) -> None:
                     raise SessionError(
                         f"task {task['id']} is {task['status']}; all tasks must be reviewed"
                     )
+                current_round = int(task.get("round", 1))
+                round_entry = next(
+                    (entry for entry in task.get("rounds", []) if entry["round"] == current_round),
+                    None,
+                )
+                if round_entry is None or not round_entry.get("runtime_feedback_file"):
+                    raise SessionError(
+                        f"task {task['id']} has no runtime feedback for its current round"
+                    )
                 if not task.get("revealed"):
                     raise SessionError(
                         f"task {task['id']} feedback has not been revealed yet"
@@ -939,6 +957,16 @@ def _copy_tree(src: Path, dst: Path) -> None:
         shutil.copytree(src, dst, dirs_exist_ok=True)
 
 
+def _copy_if_tracked(src_root: Path, rel_path: Optional[str], dst_root: Path, label: str) -> None:
+    if not rel_path:
+        return
+    src = src_root / rel_path
+    _require_nonempty_text(src, label)
+    dst = dst_root / rel_path
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src, dst)
+
+
 def export_session(session: Path, output: Path) -> None:
     state = load_state(session)
     output = output.resolve()
@@ -947,7 +975,8 @@ def export_session(session: Path, output: Path) -> None:
     output.mkdir(parents=True, exist_ok=True)
 
     _copy_tree(session / "student", output / "student")
-    _copy_tree(session / "shared", output / "shared")
+    _copy_tree(session / "shared" / "questions", output / "shared" / "questions")
+    _copy_tree(session / "shared" / "tasks", output / "shared" / "tasks")
 
     for phase, phase_data in state["phases"].items():
         if phase in {str(p) for p in PHASE_BARRIER_PHASES}:
@@ -969,9 +998,7 @@ def export_session(session: Path, output: Path) -> None:
                         shutil.copyfile(feedback_src, feedback_dst)
             for task in _phase2_tasks(state).values():
                 for round_entry in task.get("rounds", []):
-                    if round_entry.get("artifact_file"):
-                        artifact_src = session / round_entry["artifact_file"]
-                        _require_nonempty_text(artifact_src, "artifact")
+                    _copy_if_tracked(session, round_entry.get("runtime_feedback_file"), output, "runtime feedback")
                     if round_entry.get("revealed") and round_entry.get("revealed_feedback_file"):
                         feedback_src = session / round_entry["revealed_feedback_file"]
                         _require_nonempty_text(feedback_src, "feedback")
@@ -1121,6 +1148,19 @@ def check_session(session: Path) -> None:
     }
     for unexpected in sorted(actual_locked_feedback - locked_feedback):
         errors.append(f"untracked locked feedback on disk: {unexpected}")
+
+    expected_runtime_feedback = {
+        round_entry["runtime_feedback_file"]
+        for task in _phase2_tasks(state).values()
+        for round_entry in task.get("rounds", [])
+        if round_entry.get("runtime_feedback_file")
+    }
+    actual_runtime_feedback = {
+        str(path.relative_to(session))
+        for path in (session / "shared" / "runtime-feedback").rglob("*.md")
+    }
+    for unexpected in sorted(actual_runtime_feedback - expected_runtime_feedback):
+        errors.append(f"untracked runtime feedback on disk: {unexpected}")
 
     if errors:
         raise SessionError("; ".join(errors))
@@ -1312,6 +1352,24 @@ def _status_dict(state: Dict[str, Any]) -> Dict[str, Any]:
                             "status": t["status"],
                             "round": t.get("round", 1),
                             "completed_round": t.get("completed_round", 0),
+                            "runtime_feedback_ready": bool(
+                                next(
+                                    (
+                                        entry.get("runtime_feedback_file")
+                                        for entry in t.get("rounds", [])
+                                        if entry["round"] == int(t.get("round", 1))
+                                    ),
+                                    None,
+                                )
+                            ),
+                            "runtime_exit_code": next(
+                                (
+                                    entry.get("runtime_exit_code")
+                                    for entry in t.get("rounds", [])
+                                    if entry["round"] == int(t.get("round", 1))
+                                ),
+                                None,
+                            ),
                         }
                         for tid, t in tasks.items()
                     },

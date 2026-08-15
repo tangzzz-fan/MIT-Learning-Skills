@@ -248,6 +248,9 @@ class SessionCliTest(unittest.TestCase):
         self.assertTrue(
             (self.session_dir / "shared" / "runtime-feedback" / "t01" / "round1.md").exists()
         )
+        status = self.run_cli("status", "--session", str(self.session_dir))
+        self.assertIn('"runtime_feedback_ready": true', status.stdout)
+        self.assertIn('"runtime_exit_code": 1', status.stdout)
 
     def test_executable_next_suggests_run_check_after_submission(self):
         self.advance_executable_to_phase_2()
@@ -275,6 +278,43 @@ class SessionCliTest(unittest.TestCase):
         )
         result = self.run_cli("next", "--session", str(self.session_dir))
         self.assertIn("run-check", result.stdout)
+
+    def test_executable_task_feedback_requires_runtime_feedback(self):
+        self.advance_executable_to_phase_2()
+        self.run_cli(
+            "start-task",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "t01",
+            "--title",
+            "Broken task",
+            "--check-command",
+            "python3 -c 'print(0)'",
+            "--text",
+            "Fix the broken fixture.",
+        )
+        self.run_cli(
+            "submit-artifact",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "t01",
+            "--text",
+            "patch",
+        )
+        result = self.run_cli(
+            "save-task-feedback",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "t01",
+            "--text",
+            "hint",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("run-check before saving coach feedback", result.stderr)
 
     def test_executable_feedback_remains_revealed_only_after_explicit_reveal(self):
         self.advance_executable_to_phase_2()
@@ -326,6 +366,55 @@ class SessionCliTest(unittest.TestCase):
         self.assertTrue(
             (self.session_dir / "coach" / "feedback" / "t01" / "round1.md").exists()
         )
+
+    def test_executable_resubmit_clears_previous_runtime_feedback(self):
+        self.advance_executable_to_phase_2()
+        self.run_cli(
+            "start-task",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "t01",
+            "--title",
+            "Broken task",
+            "--check-command",
+            "python3 -c 'print(0)'",
+            "--text",
+            "Fix the broken fixture.",
+        )
+        self.run_cli(
+            "submit-artifact",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "t01",
+            "--text",
+            "patch v1",
+        )
+        self.run_cli("run-check", "--session", str(self.session_dir), "--id", "t01")
+        self.run_cli(
+            "submit-artifact",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "t01",
+            "--text",
+            "patch v2",
+        )
+        status = self.run_cli("status", "--session", str(self.session_dir))
+        self.assertIn('"runtime_feedback_ready": false', status.stdout)
+        result = self.run_cli(
+            "save-task-feedback",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "t01",
+            "--text",
+            "hint",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("run-check before saving coach feedback", result.stderr)
 
     def test_phase_artifact_requires_student_attempt(self):
         self.init_session()
@@ -624,6 +713,56 @@ class SessionCliTest(unittest.TestCase):
         result = self.run_cli("check", "--session", str(self.session_dir), check=False)
         self.assertEqual(result.returncode, 1)
         self.assertIn("untracked locked feedback on disk", result.stderr)
+
+    def test_check_rejects_untracked_runtime_feedback_file(self):
+        self.advance_executable_to_phase_2()
+        leaked = self.session_dir / "shared" / "runtime-feedback" / "t99" / "round1.md"
+        leaked.parent.mkdir(parents=True, exist_ok=True)
+        leaked.write_text("leak", encoding="utf-8")
+
+        result = self.run_cli("check", "--session", str(self.session_dir), check=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("untracked runtime feedback on disk", result.stderr)
+
+    def test_export_ignores_untracked_runtime_feedback(self):
+        self.advance_executable_to_phase_2()
+        self.run_cli(
+            "start-task",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "t01",
+            "--title",
+            "Broken task",
+            "--check-command",
+            "python3 -c 'print(0)'",
+            "--text",
+            "Fix the broken fixture.",
+        )
+        self.run_cli(
+            "submit-artifact",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "t01",
+            "--text",
+            "patch",
+        )
+        self.run_cli("run-check", "--session", str(self.session_dir), "--id", "t01")
+        leaked = self.session_dir / "shared" / "runtime-feedback" / "t99" / "round1.md"
+        leaked.parent.mkdir(parents=True, exist_ok=True)
+        leaked.write_text("leak", encoding="utf-8")
+
+        export_dir = Path(self.tmp.name) / "export-exec"
+        self.run_cli(
+            "export",
+            "--session",
+            str(self.session_dir),
+            "--output",
+            str(export_dir),
+        )
+        self.assertTrue((export_dir / "shared" / "runtime-feedback" / "t01" / "round1.md").exists())
+        self.assertFalse((export_dir / "shared" / "runtime-feedback" / "t99" / "round1.md").exists())
 
     def test_finish_phase_two_requires_ten_revealed_questions(self):
         self.advance_to_phase_2()

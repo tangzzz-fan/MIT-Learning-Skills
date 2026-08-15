@@ -61,3 +61,5 @@
 
 - `run-check` 产出的 runtime feedback 立即写到 `shared/runtime-feedback/`
 - 教练反馈仍先写到 `state/locked/`，只有 reveal 后才进入 `coach/`
+- 学生重新提交产物后，上一轮当前产物对应的 runtime feedback 会失效，必须重新运行 `run-check`
+- `save-task-feedback` 依赖当前轮已有 runtime feedback，这样教练解释不会脱离真实执行结果
