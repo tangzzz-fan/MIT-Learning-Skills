@@ -140,6 +140,18 @@ class SessionCliTest(unittest.TestCase):
             "1",
         )
 
+    def force_phase(self, phase: int, executable: bool = False):
+        if executable:
+            self.init_executable_session()
+        else:
+            self.init_session()
+        state = session.load_state(self.session_dir)
+        for idx in range(1, phase):
+            state["phases"][str(idx)]["status"] = "completed"
+        state["current_phase"] = phase
+        state["phases"][str(phase)]["status"] = "in_progress"
+        session.save_state(self.session_dir, state)
+
     def test_init_personas_default_to_empty_and_are_reported(self):
         self.init_session()
         state = session.load_state(self.session_dir)
@@ -199,7 +211,7 @@ class SessionCliTest(unittest.TestCase):
             self.assertTrue((self.session_dir / rel).is_dir(), rel)
 
         state = json.loads((self.session_dir / "state" / "session.json").read_text(encoding="utf-8"))
-        self.assertEqual(state["schema_version"], 4)
+        self.assertEqual(state["schema_version"], 5)
         self.assertEqual(state["materials"][0]["name"], "material.md")
         self.assertTrue(state["materials"][0]["sha256"])
 
@@ -366,6 +378,225 @@ class SessionCliTest(unittest.TestCase):
         self.assertTrue(
             (self.session_dir / "coach" / "feedback" / "t01" / "round1.md").exists()
         )
+
+    def test_phase_three_executable_migration_task_advances_to_phase_four(self):
+        self.force_phase(3, executable=True)
+        self.run_cli(
+            "record-attempt",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "3",
+            "--text",
+            "migration attempt",
+        )
+        self.run_cli(
+            "save-phase-artifact",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "3",
+            "--text",
+            "phase 3 artifact",
+        )
+        self.run_cli(
+            "reveal-phase",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "3",
+        )
+        self.run_cli(
+            "start-exec-task",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "3",
+            "--id",
+            "m01",
+            "--title",
+            "Port to smaller runtime",
+            "--check-command",
+            "python3 -c 'print(0)'",
+            "--text",
+            "Migrate the example to a constrained runtime.",
+        )
+        self.run_cli(
+            "submit-exec-artifact",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "3",
+            "--id",
+            "m01",
+            "--text",
+            "patch",
+        )
+        self.run_cli(
+            "run-exec-check",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "3",
+            "--id",
+            "m01",
+        )
+        self.run_cli(
+            "save-exec-feedback",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "3",
+            "--id",
+            "m01",
+            "--text",
+            "coach note",
+        )
+        self.run_cli(
+            "reveal-exec-feedback",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "3",
+            "--id",
+            "m01",
+        )
+        self.run_cli(
+            "finish-phase",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "3",
+        )
+        state = session.load_state(self.session_dir)
+        self.assertEqual(state["current_phase"], 4)
+
+    def test_phase_four_regression_task_appears_in_status_and_export(self):
+        self.force_phase(4, executable=True)
+        self.run_cli(
+            "record-attempt",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "4",
+            "--text",
+            "regression notes",
+        )
+        self.run_cli(
+            "save-phase-artifact",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "4",
+            "--text",
+            "phase 4 artifact",
+        )
+        self.run_cli(
+            "reveal-phase",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "4",
+        )
+        self.run_cli(
+            "start-exec-task",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "4",
+            "--id",
+            "r01",
+            "--title",
+            "Keep regression",
+            "--check-command",
+            "python3 -c 'print(0)'",
+            "--text",
+            "Preserve the failing case as a regression asset.",
+        )
+        self.run_cli(
+            "submit-exec-artifact",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "4",
+            "--id",
+            "r01",
+            "--text",
+            "patch",
+        )
+        self.run_cli(
+            "run-exec-check",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "4",
+            "--id",
+            "r01",
+        )
+        self.run_cli(
+            "save-exec-feedback",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "4",
+            "--id",
+            "r01",
+            "--text",
+            "coach note",
+        )
+        self.run_cli(
+            "reveal-exec-feedback",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "4",
+            "--id",
+            "r01",
+        )
+        status = self.run_cli("status", "--session", str(self.session_dir))
+        self.assertIn('"task_count": 1', status.stdout)
+        self.assertIn('"runtime_feedback_ready": true', status.stdout)
+
+        export_dir = Path(self.tmp.name) / "phase4-export"
+        self.run_cli(
+            "export",
+            "--session",
+            str(self.session_dir),
+            "--output",
+            str(export_dir),
+        )
+        self.assertTrue((export_dir / "shared" / "regression-cases" / "r01.md").exists())
+        self.assertTrue((export_dir / "shared" / "runtime-feedback" / "phase4" / "r01" / "round1.md").exists())
+
+    def test_next_suggests_start_exec_task_for_phase_three_after_barrier(self):
+        self.force_phase(3, executable=True)
+        self.run_cli(
+            "record-attempt",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "3",
+            "--text",
+            "migration attempt",
+        )
+        self.run_cli(
+            "save-phase-artifact",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "3",
+            "--text",
+            "phase 3 artifact",
+        )
+        self.run_cli(
+            "reveal-phase",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "3",
+        )
+        result = self.run_cli("next", "--session", str(self.session_dir))
+        self.assertIn("start-exec-task", result.stdout)
 
     def test_executable_resubmit_clears_previous_runtime_feedback(self):
         self.advance_executable_to_phase_2()
@@ -1043,7 +1274,7 @@ class SessionCliTest(unittest.TestCase):
         )
 
         migrated = session.load_state(self.session_dir)
-        self.assertEqual(migrated["schema_version"], 4)
+        self.assertEqual(migrated["schema_version"], 5)
         self.assertIn("revealed", migrated["phases"]["1"]["barrier"])
         self.assertIn("locked_file", migrated["phases"]["1"]["barrier"])
         self.assertEqual(migrated["assessment_mode"], "conceptual")

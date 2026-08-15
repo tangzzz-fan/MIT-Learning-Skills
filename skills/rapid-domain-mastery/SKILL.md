@@ -46,6 +46,8 @@ python3 "$SKILL_DIR/scripts/session.py" status --session .rdm
   shared/
     questions/  # 学生和教练都能看到的题目
     tasks/      # executable 模式下的任务说明
+    migration-tasks/  # executable 模式下的 Phase 3 迁移任务
+    regression-cases/  # executable 模式下的 Phase 4 回归用例
     runtime-feedback/  # executable 模式下即时可见的环境反馈
   state/
     session.json
@@ -138,9 +140,39 @@ python3 "$SKILL_DIR/scripts/session.py" reveal-task-feedback --session .rdm --id
 
 让学生先完成反事实推演、跨领域迁移、最小可行解释和未知问题生成，再解锁教练对因果链条和迁移边界的检查。
 
+若 `assessment_mode=executable`，Phase 3 可以把迁移题变成可运行任务：
+
+```bash
+python3 "$SKILL_DIR/scripts/session.py" start-exec-task --session .rdm --phase 3 --id m01 \
+  --title "迁移到陌生约束" \
+  --check-command "pytest -q" \
+  --from-file shared/migration-tasks/m01.md
+python3 "$SKILL_DIR/scripts/session.py" submit-exec-artifact --session .rdm --phase 3 --id m01 \
+  --from-file student/artifacts/phase3.m01.diff
+python3 "$SKILL_DIR/scripts/session.py" run-exec-check --session .rdm --phase 3 --id m01
+python3 "$SKILL_DIR/scripts/session.py" save-exec-feedback --session .rdm --phase 3 --id m01 \
+  --from-file coach/feedback/phase3/m01.md
+python3 "$SKILL_DIR/scripts/session.py" reveal-exec-feedback --session .rdm --phase 3 --id m01
+```
+
 ### Phase 4：个人知识资产固化
 
 让学生先整理自己的概念图、错题本、速查卡，再让教练补漏并校对，最后导出已解锁内容：
+
+若 `assessment_mode=executable`，Phase 4 可以把“错题本”升级成可复跑的回归用例册：
+
+```bash
+python3 "$SKILL_DIR/scripts/session.py" start-exec-task --session .rdm --phase 4 --id r01 \
+  --title "保留历史错误为回归用例" \
+  --check-command "pytest -q" \
+  --from-file shared/regression-cases/r01.md
+python3 "$SKILL_DIR/scripts/session.py" submit-exec-artifact --session .rdm --phase 4 --id r01 \
+  --from-file student/artifacts/phase4.r01.diff
+python3 "$SKILL_DIR/scripts/session.py" run-exec-check --session .rdm --phase 4 --id r01
+python3 "$SKILL_DIR/scripts/session.py" save-exec-feedback --session .rdm --phase 4 --id r01 \
+  --from-file coach/feedback/phase4/r01.md
+python3 "$SKILL_DIR/scripts/session.py" reveal-exec-feedback --session .rdm --phase 4 --id r01
+```
 
 ```bash
 python3 "$SKILL_DIR/scripts/session.py" finish-phase --session .rdm --phase 4
@@ -167,6 +199,12 @@ python3 "$SKILL_DIR/scripts/session.py" export --session .rdm --output exports/r
 | `save-task-feedback` | 保存 executable 任务的教练反馈 |
 | `reveal-task-feedback` | 读取 executable 任务已解锁的教练反馈 |
 | `request-task-followup` | 为 executable 任务开启下一轮 |
+| `start-exec-task` | 创建 Phase 3/4 的 executable 任务 |
+| `submit-exec-artifact` | 提交 Phase 3/4 的学生产物 |
+| `run-exec-check` | 运行 Phase 3/4 的即时环境检查 |
+| `save-exec-feedback` | 保存 Phase 3/4 的教练反馈 |
+| `reveal-exec-feedback` | 读取 Phase 3/4 已解锁的教练反馈 |
+| `request-exec-followup` | 为 Phase 3/4 任务开启下一轮 |
 | `finish-phase` | 校验并标记阶段完成 |
 | `export` | 导出学生成果和已解锁教练内容 |
 | `check` | 检查会话完整性 |

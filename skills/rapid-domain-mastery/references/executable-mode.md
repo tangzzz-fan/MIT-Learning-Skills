@@ -38,10 +38,16 @@
 ### Phase 3
 
 - 从口头迁移切到陌生约束下的最小程序
+- 可把任务写入 `shared/migration-tasks/`
+- 学生产物进入 `student/artifacts/phase3.*`
+- runtime feedback 进入 `shared/runtime-feedback/phase3/`
 
 ### Phase 4
 
 - 固化成概念图 + 错题本 + 回归用例册
+- 回归用例写入 `shared/regression-cases/`
+- 学生产物进入 `student/artifacts/phase4.*`
+- runtime feedback 进入 `shared/runtime-feedback/phase4/`
 
 ## 模式约束
 
@@ -56,6 +62,12 @@
 - `save-task-feedback`
 - `reveal-task-feedback`
 - `request-task-followup`
+- `start-exec-task`
+- `submit-exec-artifact`
+- `run-exec-check`
+- `save-exec-feedback`
+- `reveal-exec-feedback`
+- `request-exec-followup`
 
 其中：
 
