@@ -1,8 +1,38 @@
 # MIT Learning Skills
 
-一个开源的 Codex skill 库，把“MIT 研究生用 NotebookLM 48 小时速通陌生课程”的社交媒体案例，转成可复用、可测试的 agent 学习方法。
+一个开源的 agent skill 库，把“MIT 研究生用 NotebookLM 48 小时速通陌生课程”的社交媒体案例，转成可复用、可测试的 agent 学习方法。
 
 > 原案例的真实性无法验证。仓库关注的不是故事真伪，而是其中的生成式学习（Generative Learning）机制是否可以被工程化为一个可控 skill。
+
+[![skills.sh](https://skills.sh/b/tangzzz-fan/MIT-Learning-Skills)](https://skills.sh/tangzzz-fan/MIT-Learning-Skills)
+
+## 安装（30 秒）
+
+和 [mattpocock/skills](https://github.com/mattpocock/skills) 一样，用 [skills.sh](https://skills.sh) / `npx skills` 把 skill 装进你的 coding agent：
+
+```bash
+npx skills@latest add tangzzz-fan/MIT-Learning-Skills
+```
+
+选择要安装的 skill（至少选 `rapid-domain-mastery`），以及目标 agent（Cursor、Claude Code、Codex、OpenCode 等）。
+
+只装这一个 skill：
+
+```bash
+npx skills@latest add tangzzz-fan/MIT-Learning-Skills --skill rapid-domain-mastery
+```
+
+更新已安装的 skill：
+
+```bash
+npx skills@latest update
+```
+
+本地开发本仓库时，也可以直接从当前目录安装：
+
+```bash
+npx skills@latest add ./ --skill rapid-domain-mastery
+```
 
 ## 已实现的 skill
 
@@ -44,7 +74,15 @@ session/
 
 详细规则见 [references/separation-protocol.md](skills/rapid-domain-mastery/references/separation-protocol.md)。
 
-## 快速开始
+## 使用
+
+安装后，在 agent 里直接说：
+
+```text
+Use rapid-domain-mastery to turn my materials into a four-phase mastery sprint with a coach/student barrier.
+```
+
+或在本仓库开发时，把 `$SKILL_DIR` 指向 skill 目录，手动驱动会话：
 
 ```bash
 # 1. 初始化会话
@@ -70,13 +108,36 @@ python3 skills/rapid-domain-mastery/scripts/session.py reveal-phase \
   --session .rdm --phase 1
 ```
 
-在 Codex 中调用时，把 `$SKILL_DIR` 指向 skill 目录：
+`--student-persona` 和 `--coach-persona` 是可选参数。设置后，身份会写入会话状态并自动带入四阶段 prompt。
 
-```text
-Use $rapid-domain-mastery to turn my materials into a four-phase mastery sprint with a coach/student barrier.
+## 本地模拟：playground + user agent
+
+仓库维护者不该用自己当第一位学员。用 git 忽略的 `playground/` 搭一个**模拟用户**，让 user agent 扮演真实学习者，再调用 `rapid-domain-mastery` 当教练：
+
+```bash
+python3 scripts/scaffold-playground.py
 ```
 
-`--student-persona` 和 `--coach-persona` 是可选参数。设置后，身份会写入会话状态并自动带入四阶段 prompt。
+这会创建（已被 `.gitignore` 忽略）：
+
+```text
+playground/
+  USER_AGENT.md       # 模拟用户的行为规范（给第二个 agent / 同一会话的学生角色）
+  materials/          # 最小多视角材料包
+  .rdm/               # 由 skill 初始化的会话（首次 scaffold 后需自行 init，或用 --init）
+  logs/               # 可选：模拟轮次记录
+```
+
+带会话初始化：
+
+```bash
+python3 scripts/scaffold-playground.py --init
+```
+
+然后开两个角色（两个会话，或同一 agent 严格分角色）：
+
+1. **Coach agent**：加载 `rapid-domain-mastery`，只驱动教练侧与 `session.py`。
+2. **User agent**：只读 `playground/USER_AGENT.md`，只写 `student/` 与回答，绝不读 `coach/`。
 
 ## 仓库结构
 
@@ -90,11 +151,15 @@ Use $rapid-domain-mastery to turn my materials into a four-phase mastery sprint 
 │       └── references/
 │           ├── phase-prompts.md
 │           └── separation-protocol.md
+├── scripts/
+│   └── scaffold-playground.py
 ├── tests/
 │   ├── test_session.py
 │   └── test_skill_structure.py
 └── .github/workflows/ci.yml
 ```
+
+`playground/` 是本地沙盒，不进 git。
 
 ## 测试与 CI
 
