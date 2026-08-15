@@ -93,7 +93,13 @@ def _write_or_copy(
         _require_nonempty_text(dest, label)
 
 
-def _new_state(goal: str, budget: str, materials: Iterable[Path]) -> Dict[str, Any]:
+def _new_state(
+    goal: str,
+    budget: str,
+    materials: Iterable[Path],
+    student_persona: str,
+    coach_persona: str,
+) -> Dict[str, Any]:
     manifest = []
     for material in materials:
         resolved = material.resolve()
@@ -142,13 +148,22 @@ def _new_state(goal: str, budget: str, materials: Iterable[Path]) -> Dict[str, A
         "created_at": utcnow(),
         "goal": goal.strip(),
         "time_budget": budget.strip(),
+        "student_persona": student_persona.strip(),
+        "coach_persona": coach_persona.strip(),
         "materials": manifest,
         "current_phase": 1,
         "phases": phases,
     }
 
 
-def init_session(output: Path, goal: str, budget: str, materials: Iterable[Path]) -> None:
+def init_session(
+    output: Path,
+    goal: str,
+    budget: str,
+    materials: Iterable[Path],
+    student_persona: str,
+    coach_persona: str,
+) -> None:
     output = output.resolve()
     state_path = output / "state" / "session.json"
     if state_path.exists():
@@ -165,7 +180,7 @@ def init_session(output: Path, goal: str, budget: str, materials: Iterable[Path]
     ):
         (output / rel).mkdir(parents=True, exist_ok=True)
 
-    state = _new_state(goal, budget, materials)
+    state = _new_state(goal, budget, materials, student_persona, coach_persona)
     _write_json(state_path, state)
     print(f"initialized session: {output}")
 
@@ -179,6 +194,8 @@ def load_state(session: Path) -> Dict[str, Any]:
         raise SessionError(
             f"unsupported session schema: {state.get('schema_version')}; expected {SCHEMA_VERSION}"
         )
+    state.setdefault("student_persona", "")
+    state.setdefault("coach_persona", "")
     return state
 
 
@@ -444,6 +461,8 @@ def _status_dict(state: Dict[str, Any], session: Path) -> Dict[str, Any]:
         "id": state["id"],
         "goal": state["goal"],
         "time_budget": state["time_budget"],
+        "student_persona": state.get("student_persona", ""),
+        "coach_persona": state.get("coach_persona", ""),
         "current_phase": state["current_phase"],
         "phases": {},
     }
@@ -501,6 +520,8 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--output", default=".rdm", help="session directory (default: .rdm)")
     init.add_argument("--goal", required=True, help="learning goal")
     init.add_argument("--budget", default="", help="time budget")
+    init.add_argument("--student-persona", default="", help="optional learner persona or scenario")
+    init.add_argument("--coach-persona", default="", help="optional coach persona or scenario")
     init.add_argument("--materials", nargs="*", default=[], help="material files or directories")
 
     status = sub.add_parser("status", help="show session status")
@@ -566,6 +587,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                 args.goal,
                 args.budget,
                 [Path(m) for m in args.materials],
+                args.student_persona,
+                args.coach_persona,
             )
         elif command == "status":
             status_session(Path(args.session))

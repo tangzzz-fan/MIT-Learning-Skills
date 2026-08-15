@@ -52,6 +52,8 @@ python3 skills/rapid-domain-mastery/scripts/session.py init \
   --output .rdm \
   --goal "掌握领域 X 的核心框架" \
   --budget "48 小时" \
+  --student-persona "非技术背景的产品新人" \
+  --coach-persona "麦肯锡资深分析家" \
   --materials ./materials/books ./materials/papers
 
 # 2. 查看状态
@@ -73,6 +75,8 @@ python3 skills/rapid-domain-mastery/scripts/session.py reveal-phase \
 ```text
 Use $rapid-domain-mastery to turn my materials into a four-phase mastery sprint with a coach/student barrier.
 ```
+
+`--student-persona` 和 `--coach-persona` 是可选参数。设置后，身份会写入会话状态并自动带入四阶段 prompt。
 
 ## 仓库结构
 

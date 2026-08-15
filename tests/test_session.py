@@ -53,6 +53,48 @@ class SessionCliTest(unittest.TestCase):
             str(self.material),
         )
 
+    def test_init_personas_default_to_empty_and_are_reported(self):
+        self.init_session()
+        state = session.load_state(self.session_dir)
+        self.assertEqual(state["student_persona"], "")
+        self.assertEqual(state["coach_persona"], "")
+
+        status = self.run_cli("status", "--session", str(self.session_dir))
+        self.assertIn('"student_persona": ""', status.stdout)
+        self.assertIn('"coach_persona": ""', status.stdout)
+
+    def test_init_stores_student_and_coach_personas(self):
+        self.run_cli(
+            "init",
+            "--output",
+            str(self.session_dir),
+            "--goal",
+            "learn a domain",
+            "--budget",
+            "48h",
+            "--student-persona",
+            "非技术背景的产品新人",
+            "--coach-persona",
+            "麦肯锡资深分析家",
+            "--materials",
+            str(self.material),
+        )
+
+        state = session.load_state(self.session_dir)
+        self.assertEqual(state["student_persona"], "非技术背景的产品新人")
+        self.assertEqual(state["coach_persona"], "麦肯锡资深分析家")
+
+    def test_load_state_normalizes_missing_persona_fields(self):
+        self.init_session()
+        state = session.load_state(self.session_dir)
+        state.pop("student_persona")
+        state.pop("coach_persona")
+        session.save_state(self.session_dir, state)
+
+        normalized = session.load_state(self.session_dir)
+        self.assertEqual(normalized["student_persona"], "")
+        self.assertEqual(normalized["coach_persona"], "")
+
     def test_init_creates_separated_directories(self):
         self.init_session()
         for rel in (

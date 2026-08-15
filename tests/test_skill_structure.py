@@ -49,6 +49,13 @@ class SkillStructureTest(unittest.TestCase):
         self.assertIn("reveal-phase", protocol)
         self.assertIn("reveal-feedback", protocol)
 
+    def test_persona_support_is_documented(self):
+        skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+        prompts = (SKILL_DIR / "references" / "phase-prompts.md").read_text(encoding="utf-8")
+        self.assertIn("--student-persona", skill)
+        self.assertIn("--coach-persona", skill)
+        self.assertIn("{coach_persona}", prompts)
+
 
 if __name__ == "__main__":
     unittest.main()

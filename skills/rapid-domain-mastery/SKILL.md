@@ -17,6 +17,8 @@ python3 "$SKILL_DIR/scripts/session.py" init \
   --output .rdm \
   --goal "你的学习目标" \
   --budget "48 小时" \
+  --student-persona "某行业新人" \
+  --coach-persona "麦肯锡资深分析家" \
   --materials 教材目录 论文目录 讲义目录
 ```
 
@@ -46,6 +48,15 @@ python3 "$SKILL_DIR/scripts/session.py" status --session .rdm
 ```
 
 学生拥有 `student/`；教练拥有 `coach/`。`shared/` 只放双方都可读的输入，不放置模型答案。
+
+## 身份与情景
+
+`init` 支持两个可选身份字段，并持久化到 `state/session.json`：
+
+- `--student-persona`：学生的初始身份或情景，例如“非技术背景的产品新人”。
+- `--coach-persona`：教练的角色，例如“麦肯锡资深分析家”。
+
+如果为空，教练使用 `references/phase-prompts.md` 中的默认角色；学生不额外代入身份。身份只影响语气、视角和难度，不改变先学生、后教练的隔断顺序。
 
 ## 教练/学生隔断（必须遵守）
 
