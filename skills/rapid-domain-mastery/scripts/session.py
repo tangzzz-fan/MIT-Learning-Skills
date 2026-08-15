@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 PHASES = {1, 2, 3, 4}
 PHASE_BARRIER_PHASES = {1, 3, 4}
 QUESTION_PHASE = 2
@@ -139,6 +139,8 @@ def _new_state(
     materials: Iterable[Path],
     student_persona: str,
     coach_persona: str,
+    assessment_mode: str,
+    workspace_root: str,
 ) -> Dict[str, Any]:
     manifest = []
     for material in materials:
@@ -193,6 +195,8 @@ def _new_state(
         "time_budget": budget.strip(),
         "student_persona": student_persona.strip(),
         "coach_persona": coach_persona.strip(),
+        "assessment_mode": assessment_mode,
+        "workspace_root": workspace_root.strip(),
         "materials": manifest,
         "current_phase": 1,
         "phases": phases,
@@ -206,6 +210,8 @@ def init_session(
     materials: Iterable[Path],
     student_persona: str,
     coach_persona: str,
+    assessment_mode: str,
+    workspace_root: str,
 ) -> None:
     output = output.resolve()
     state_path = output / "state" / "session.json"
@@ -224,29 +230,40 @@ def init_session(
     for rel in (
         "student/attempts",
         "student/answers",
+        "student/artifacts",
         "student/notes",
         "coach/phase-artifacts",
         "coach/feedback",
         "shared/questions",
+        "shared/tasks",
+        "shared/runtime-feedback",
         "state/locked/phase-artifacts",
         "state/locked/feedback",
         "state",
     ):
         (output / rel).mkdir(parents=True, exist_ok=True)
 
-    state = _new_state(goal, budget, materials, student_persona, coach_persona)
+    state = _new_state(
+        goal,
+        budget,
+        materials,
+        student_persona,
+        coach_persona,
+        assessment_mode,
+        workspace_root,
+    )
     _write_json(state_path, state)
     print(f"initialized session: {output}")
 
 
 def _migrate_state(state: Dict[str, Any]) -> Dict[str, Any]:
     version = state.get("schema_version")
-    if version not in {1, 2, 3}:
+    if version not in {1, 2, 3, 4}:
         raise SessionError(
-            f"unsupported session schema: {version}; expected one of [1, 2, 3]"
+            f"unsupported session schema: {version}; expected one of [1, 2, 3, 4]"
         )
 
-    if version in {1, 2}:
+    if version in {1, 2, 3}:
         for phase in PHASE_BARRIER_PHASES:
             barrier = state["phases"][str(phase)]["barrier"]
             if version == 1:
@@ -293,10 +310,12 @@ def _migrate_state(state: Dict[str, Any]) -> Dict[str, Any]:
             question.pop("reviewed_at", None)
             question["revealed"] = bool(revealed)
 
-        state["schema_version"] = 3
+        state["schema_version"] = 4
 
     state.setdefault("student_persona", "")
     state.setdefault("coach_persona", "")
+    state.setdefault("assessment_mode", "conceptual")
+    state.setdefault("workspace_root", "")
 
     for phase in PHASE_BARRIER_PHASES:
         barrier = state["phases"][str(phase)]["barrier"]
@@ -676,6 +695,11 @@ def check_session(session: Path) -> None:
             if current_hash != material.get("sha256"):
                 errors.append(f"material changed since init: {material_path}")
 
+    if state.get("workspace_root"):
+        workspace_root = Path(state["workspace_root"])
+        if not workspace_root.exists():
+            errors.append(f"workspace_root is missing: {workspace_root}")
+
     for phase in PHASES:
         phase_data = _phase_state(state, phase)
         if phase in PHASE_BARRIER_PHASES:
@@ -865,6 +889,8 @@ def _status_dict(state: Dict[str, Any]) -> Dict[str, Any]:
         "time_budget": state["time_budget"],
         "student_persona": state.get("student_persona", ""),
         "coach_persona": state.get("coach_persona", ""),
+        "assessment_mode": state.get("assessment_mode", "conceptual"),
+        "workspace_root": state.get("workspace_root", ""),
         "current_phase": state["current_phase"],
         "phases": {},
     }
@@ -930,6 +956,17 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--budget", default="", help="time budget")
     init.add_argument("--student-persona", default="", help="optional learner persona or scenario")
     init.add_argument("--coach-persona", default="", help="optional coach persona or scenario")
+    init.add_argument(
+        "--assessment-mode",
+        choices=("conceptual", "executable"),
+        default="conceptual",
+        help="learning assessment mode (default: conceptual)",
+    )
+    init.add_argument(
+        "--workspace-root",
+        default="",
+        help="optional project root for executable tasks",
+    )
     init.add_argument("--materials", nargs="*", default=[], help="material files or directories")
 
     status = sub.add_parser("status", help="show session status")
@@ -1004,6 +1041,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                 [Path(m) for m in args.materials],
                 args.student_persona,
                 args.coach_persona,
+                args.assessment_mode,
+                args.workspace_root,
             )
         elif command == "status":
             status_session(Path(args.session))

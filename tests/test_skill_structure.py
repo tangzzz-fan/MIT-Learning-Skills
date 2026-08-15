@@ -15,6 +15,7 @@ class SkillStructureTest(unittest.TestCase):
             "scripts/session.py",
             "references/separation-protocol.md",
             "references/phase-prompts.md",
+            "references/executable-mode.md",
         ):
             self.assertTrue((SKILL_DIR / rel).is_file(), rel)
 
@@ -55,6 +56,13 @@ class SkillStructureTest(unittest.TestCase):
         self.assertIn("--student-persona", skill)
         self.assertIn("--coach-persona", skill)
         self.assertIn("{coach_persona}", prompts)
+
+    def test_executable_mode_is_documented(self):
+        skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+        executable = (SKILL_DIR / "references" / "executable-mode.md").read_text(encoding="utf-8")
+        self.assertIn("--assessment-mode", skill)
+        self.assertIn("assessment_mode=executable", skill)
+        self.assertIn("可运行反馈", executable)
 
 
 if __name__ == "__main__":

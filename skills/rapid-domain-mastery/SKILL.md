@@ -5,7 +5,7 @@ description: Rapid Domain Mastery 把教材、论文、讲义等学习材料变�
 
 # Rapid Domain Mastery
 
-把学习材料压缩成可测试的心智模型，并用“先学生、后教练”的隔断避免假学习。
+把学习材料压缩成可测试的心智模型，并用“先学生、后教练”的隔断避免假学习。默认适合陈述性知识，也可以渐进扩展到编程这类程序性技能。
 
 ## 快速开始
 
@@ -17,6 +17,7 @@ python3 "$SKILL_DIR/scripts/session.py" init \
   --output .rdm \
   --goal "你的学习目标" \
   --budget "48 小时" \
+  --assessment-mode conceptual \
   --student-persona "某行业新人" \
   --coach-persona "麦肯锡资深分析家" \
   --materials 教材目录 论文目录 讲义目录
@@ -37,12 +38,15 @@ python3 "$SKILL_DIR/scripts/session.py" status --session .rdm
   student/
     attempts/   # 学生先写的框架、边界推理、个人知识资产
     answers/    # 学生对每个区分题的作答
+    artifacts/  # executable 模式下的补丁、源码或最小可执行产物
     notes/      # 学生笔记
   coach/
     phase-artifacts/  # 仅存放已经 reveal 给学生的阶段产物
     feedback/         # 仅存放已经 reveal 给学生的逐轮反馈
   shared/
     questions/  # 学生和教练都能看到的题目
+    tasks/      # executable 模式下的任务说明
+    runtime-feedback/  # executable 模式下即时可见的环境反馈
   state/
     session.json
     locked/      # 未 reveal 的教练内容，export 不会带出
@@ -56,6 +60,8 @@ python3 "$SKILL_DIR/scripts/session.py" status --session .rdm
 
 - `--student-persona`：学生的初始身份或情景，例如“非技术背景的产品新人”。
 - `--coach-persona`：教练的角色，例如“麦肯锡资深分析家”。
+- `--assessment-mode`：学习模式，`conceptual` 用于概念压力测试，`executable` 为程序性技能扩展预留。
+- `--workspace-root`：可选的项目根目录，供 executable 模式下运行检查使用。
 
 如果为空，教练使用 `references/phase-prompts.md` 中的默认角色；学生不额外代入身份。身份只影响语气、视角和难度，不改变先学生、后教练的隔断顺序。
 
@@ -71,6 +77,7 @@ python3 "$SKILL_DIR/scripts/session.py" status --session .rdm
 - `save-phase-artifact` / `save-feedback` 只把教练内容写入 `state/locked/`；只有执行 `reveal-*` 后，内容才会复制到 `coach/`，并进入导出。
 
 完整规则见 [references/separation-protocol.md](references/separation-protocol.md)。
+若要把 RDM 扩展到编程教学，参考 [references/executable-mode.md](references/executable-mode.md)。
 
 ## 四阶段工作流
 
@@ -144,4 +151,5 @@ python3 "$SKILL_DIR/scripts/session.py" export --session .rdm --output exports/r
 - 材料必须覆盖多个视角；单源材料会生成偏见框架。
 - `init` 至少要提供一份材料；`check` 会在文件材料被替换或改写时报告漂移。
 - 程序性知识领域（数学证明、编程、实验技能）不能只靠理解框架，必须叠加动手练习。
+- `assessment_mode=executable` 是程序性技能扩展的基础层；最小执行回路会在后续 phase 补齐。
 - 零基础或元认知不足时，先缩小范围或补充基础材料，不要硬套 48 小时压缩。

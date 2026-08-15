@@ -53,6 +53,23 @@ class SessionCliTest(unittest.TestCase):
             str(self.material),
         )
 
+    def init_executable_session(self):
+        self.run_cli(
+            "init",
+            "--output",
+            str(self.session_dir),
+            "--goal",
+            "learn executable skills",
+            "--budget",
+            "48h",
+            "--assessment-mode",
+            "executable",
+            "--workspace-root",
+            str(REPO_ROOT),
+            "--materials",
+            str(self.material),
+        )
+
     def advance_to_phase_2(self):
         self.init_session()
         self.run_cli(
@@ -135,18 +152,31 @@ class SessionCliTest(unittest.TestCase):
         for rel in (
             "student/attempts",
             "student/answers",
+            "student/artifacts",
             "student/notes",
             "coach/phase-artifacts",
             "coach/feedback",
             "shared/questions",
+            "shared/tasks",
+            "shared/runtime-feedback",
             "state",
         ):
             self.assertTrue((self.session_dir / rel).is_dir(), rel)
 
         state = json.loads((self.session_dir / "state" / "session.json").read_text(encoding="utf-8"))
-        self.assertEqual(state["schema_version"], 3)
+        self.assertEqual(state["schema_version"], 4)
         self.assertEqual(state["materials"][0]["name"], "material.md")
         self.assertTrue(state["materials"][0]["sha256"])
+
+    def test_init_stores_executable_mode_and_workspace_root(self):
+        self.init_executable_session()
+        state = session.load_state(self.session_dir)
+        self.assertEqual(state["assessment_mode"], "executable")
+        self.assertEqual(state["workspace_root"], str(REPO_ROOT))
+
+        status = self.run_cli("status", "--session", str(self.session_dir))
+        self.assertIn('"assessment_mode": "executable"', status.stdout)
+        self.assertIn(f'"workspace_root": "{REPO_ROOT}"', status.stdout)
 
     def test_phase_artifact_requires_student_attempt(self):
         self.init_session()
@@ -725,9 +755,10 @@ class SessionCliTest(unittest.TestCase):
         )
 
         migrated = session.load_state(self.session_dir)
-        self.assertEqual(migrated["schema_version"], 3)
+        self.assertEqual(migrated["schema_version"], 4)
         self.assertIn("revealed", migrated["phases"]["1"]["barrier"])
         self.assertIn("locked_file", migrated["phases"]["1"]["barrier"])
+        self.assertEqual(migrated["assessment_mode"], "conceptual")
 
 
 if __name__ == "__main__":
