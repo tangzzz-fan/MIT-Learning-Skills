@@ -1,0 +1,129 @@
+---
+name: rapid-domain-mastery
+description: Rapid Domain Mastery 把教材、论文、讲义等学习材料变成可验证的个人知识框架，并执行四阶段学习：骨架提取、认知压力测试、边界探索迁移、知识资产固化。使用时机：用户想快速学习/速通一门陌生课程、准备考试或项目、把大量阅读材料转化为深层理解、执行“MIT 48 小时 NotebookLM”式学习法，或要求“先搭骨架、再压力测试、最后迁移验证”。该 skill 强制教练/学生隔断，只有在学生先提交自己的回答或框架后，才允许生成和读取教练的模型答案、推理与反馈。
+---
+
+# Rapid Domain Mastery
+
+把学习材料压缩成可测试的心智模型，并用“先学生、后教练”的隔断避免假学习。
+
+## 快速开始
+
+1. 确认学习材料是多个视角的文件或目录；单本教材会产生偏见。
+2. 创建会话：
+
+```bash
+python3 "$SKILL_DIR/scripts/session.py" init \
+  --output .rdm \
+  --goal "你的学习目标" \
+  --budget "48 小时" \
+  --materials 教材目录 论文目录 讲义目录
+```
+
+3. 查看状态：
+
+```bash
+python3 "$SKILL_DIR/scripts/session.py" status --session .rdm
+```
+
+4. 依次执行 Phase 1 到 Phase 4。先写学生自己的尝试，再解锁教练内容。
+
+## 会话目录
+
+```
+.rdm/
+  student/
+    attempts/   # 学生先写的框架、边界推理、个人知识资产
+    answers/    # 学生对每个区分题的作答
+    notes/      # 学生笔记
+  coach/
+    phase-artifacts/  # 教练在 Phase 1/3/4 学生提交后生成的框架或评价
+    feedback/         # 教练在 Phase 2 学生提交后生成的逐题反馈
+  shared/
+    questions/  # 学生和教练都能看到的题目
+  state/
+    session.json
+```
+
+学生拥有 `student/`；教练拥有 `coach/`。`shared/` 只放双方都可读的输入，不放置模型答案。
+
+## 教练/学生隔断（必须遵守）
+
+“假学习”来自学生过早看到标准答案。以下规则不可跳过：
+
+- 不要直接 `cat`、读取或总结 `coach/` 下的任何文件。只使用 `session.py` 的 `reveal-phase` 或 `reveal-feedback` 命令。
+- Phase 1：先让学生写 `student/attempts/phase1.md` 的朴素框架，再生成 `coach/phase-artifacts/phase1.md`。
+- Phase 2：先把题目写入 `shared/questions/`，等学生提交 `student/answers/<id>.md`，再生成 `coach/feedback/<id>.md`。
+- Phase 3 和 Phase 4 同样遵循“学生尝试 -> 教练评价 -> 解锁”。
+- 如果学生没有提交自己的内容，立即停止并提示学生先完成；不要给答案、暗示或“我先给你看看正确版本”。
+
+完整规则见 [references/separation-protocol.md](references/separation-protocol.md)。
+
+## 四阶段工作流
+
+每个阶段的完整 prompt 模板在 [references/phase-prompts.md](references/phase-prompts.md)。执行时按以下顺序操作，并只加载当前阶段的模板。
+
+### Phase 1：骨架提取
+
+目标是在 30 分钟内建立高层认知地图。先让学生用自己的话写出已知框架，再让教练从材料中抽取：
+
+- 3-5 个核心心智模型，每个都能一句话定义并说明适用问题。
+- 2-3 个根本争议，标明共识区、活跃争议和开放问题。
+- 不超过三层的知识骨架，并标注每个节点的“承重”程度。
+
+用命令记录和解锁：
+
+```bash
+python3 "$SKILL_DIR/scripts/session.py" record-attempt --session .rdm --phase 1 --from-file student/attempts/phase1.md
+python3 "$SKILL_DIR/scripts/session.py" save-phase-artifact --session .rdm --phase 1 --from-file coach/phase-artifacts/phase1.md
+python3 "$SKILL_DIR/scripts/session.py" reveal-phase --session .rdm --phase 1
+```
+
+### Phase 2：认知压力测试
+
+生成 10 道“区分题”，覆盖概念辨析、场景应用、方法论比较和开放设计。题目放在 `shared/questions/`，答案和标准推理绝不能在学生提交前写入 `coach/`。
+
+```bash
+python3 "$SKILL_DIR/scripts/session.py" start-question --session .rdm --id q01 --title "第一题" --from-file shared/questions/q01.md
+# 学生完成 student/answers/q01.md 后：
+python3 "$SKILL_DIR/scripts/session.py" submit --session .rdm --id q01 --from-file student/answers/q01.md
+# 教练生成反馈后：
+python3 "$SKILL_DIR/scripts/session.py" save-feedback --session .rdm --id q01 --from-file coach/feedback/q01.md
+python3 "$SKILL_DIR/scripts/session.py" reveal-feedback --session .rdm --id q01
+```
+
+### Phase 3：边界探索与迁移验证
+
+让学生先完成反事实推演、跨领域迁移、最小可行解释和未知问题生成，再解锁教练对因果链条和迁移边界的检查。
+
+### Phase 4：个人知识资产固化
+
+让学生先整理自己的概念图、错题本、速查卡，再让教练补漏并校对，最后导出已解锁内容：
+
+```bash
+python3 "$SKILL_DIR/scripts/session.py" finish-phase --session .rdm --phase 4
+python3 "$SKILL_DIR/scripts/session.py" export --session .rdm --output exports/rdm-export
+```
+
+## 脚本命令速查
+
+| 命令 | 用途 |
+|---|---|
+| `init` | 创建会话并记录材料清单 |
+| `status` | 查看阶段、题目和隔断状态 |
+| `record-attempt` | 记录 Phase 1/3/4 的学生尝试 |
+| `save-phase-artifact` | 学生提交后保存教练阶段产物 |
+| `reveal-phase` | 读取已解锁的教练阶段产物 |
+| `start-question` | 创建 Phase 2 题目 |
+| `submit` | 提交学生答案 |
+| `save-feedback` | 学生提交后保存教练反馈 |
+| `reveal-feedback` | 读取已解锁的教练反馈 |
+| `finish-phase` | 校验并标记阶段完成 |
+| `export` | 导出学生成果和已解锁教练内容 |
+| `check` | 检查会话完整性 |
+
+## 注意事项
+
+- 材料必须覆盖多个视角；单源材料会生成偏见框架。
+- 程序性知识领域（数学证明、编程、实验技能）不能只靠理解框架，必须叠加动手练习。
+- 零基础或元认知不足时，先缩小范围或补充基础材料，不要硬套 48 小时压缩。
