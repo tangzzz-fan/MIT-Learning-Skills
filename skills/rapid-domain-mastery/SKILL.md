@@ -28,7 +28,7 @@ python3 "$SKILL_DIR/scripts/session.py" init \
 python3 "$SKILL_DIR/scripts/session.py" status --session .rdm
 ```
 
-4. 依次执行 Phase 1 到 Phase 4。先写学生自己的尝试，再解锁教练内容。
+4. 依次执行 Phase 1 到 Phase 4。CLI 会强制阶段顺序；先写学生自己的尝试，再保存并解锁教练内容。
 
 ## 会话目录
 
@@ -39,12 +39,13 @@ python3 "$SKILL_DIR/scripts/session.py" status --session .rdm
     answers/    # 学生对每个区分题的作答
     notes/      # 学生笔记
   coach/
-    phase-artifacts/  # 教练在 Phase 1/3/4 学生提交后生成的框架或评价
-    feedback/         # 教练在 Phase 2 学生提交后生成的逐题反馈
+    phase-artifacts/  # 仅存放已经 reveal 给学生的阶段产物
+    feedback/         # 仅存放已经 reveal 给学生的逐轮反馈
   shared/
     questions/  # 学生和教练都能看到的题目
   state/
     session.json
+    locked/      # 未 reveal 的教练内容，export 不会带出
 ```
 
 学生拥有 `student/`；教练拥有 `coach/`。`shared/` 只放双方都可读的输入，不放置模型答案。
@@ -67,6 +68,7 @@ python3 "$SKILL_DIR/scripts/session.py" status --session .rdm
 - Phase 2：先把题目写入 `shared/questions/`，等学生提交 `student/answers/<id>.md`，再生成 `coach/feedback/<id>.md`。
 - Phase 3 和 Phase 4 同样遵循“学生尝试 -> 教练评价 -> 解锁”。
 - 如果学生没有提交自己的内容，立即停止并提示学生先完成；不要给答案、暗示或“我先给你看看正确版本”。
+- `save-phase-artifact` / `save-feedback` 只把教练内容写入 `state/locked/`；只有执行 `reveal-*` 后，内容才会复制到 `coach/`，并进入导出。
 
 完整规则见 [references/separation-protocol.md](references/separation-protocol.md)。
 
@@ -92,7 +94,7 @@ python3 "$SKILL_DIR/scripts/session.py" reveal-phase --session .rdm --phase 1
 
 ### Phase 2：认知压力测试
 
-生成 10 道“区分题”，覆盖概念辨析、场景应用、方法论比较和开放设计。题目放在 `shared/questions/`，答案和标准推理绝不能在学生提交前写入 `coach/`。
+生成至少 10 道“区分题”，覆盖概念辨析、场景应用、方法论比较和开放设计。题目放在 `shared/questions/`，答案和标准推理绝不能在学生提交前写入 `coach/`。学生答案至少要包含两行非空内容：自己的结论，以及支撑该结论的推理。若教练在反馈中提出追问，必须先 `reveal-feedback`，再用 `request-followup` 开启下一轮作答。
 
 ```bash
 python3 "$SKILL_DIR/scripts/session.py" start-question --session .rdm --id q01 --title "第一题" --from-file shared/questions/q01.md
@@ -101,6 +103,8 @@ python3 "$SKILL_DIR/scripts/session.py" submit --session .rdm --id q01 --from-fi
 # 教练生成反馈后：
 python3 "$SKILL_DIR/scripts/session.py" save-feedback --session .rdm --id q01 --from-file coach/feedback/q01.md
 python3 "$SKILL_DIR/scripts/session.py" reveal-feedback --session .rdm --id q01
+# 若反馈里有追问：
+python3 "$SKILL_DIR/scripts/session.py" request-followup --session .rdm --id q01
 ```
 
 ### Phase 3：边界探索与迁移验证
@@ -129,12 +133,15 @@ python3 "$SKILL_DIR/scripts/session.py" export --session .rdm --output exports/r
 | `submit` | 提交学生答案 |
 | `save-feedback` | 学生提交后保存教练反馈 |
 | `reveal-feedback` | 读取已解锁的教练反馈 |
+| `request-followup` | 在已 reveal 的反馈后开启下一轮追问 |
 | `finish-phase` | 校验并标记阶段完成 |
 | `export` | 导出学生成果和已解锁教练内容 |
 | `check` | 检查会话完整性 |
+| `next` | 输出当前阶段推荐的下一条命令 |
 
 ## 注意事项
 
 - 材料必须覆盖多个视角；单源材料会生成偏见框架。
+- `init` 至少要提供一份材料；`check` 会在文件材料被替换或改写时报告漂移。
 - 程序性知识领域（数学证明、编程、实验技能）不能只靠理解框架，必须叠加动手练习。
 - 零基础或元认知不足时，先缩小范围或补充基础材料，不要硬套 48 小时压缩。

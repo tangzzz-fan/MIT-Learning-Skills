@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 PHASES = {1, 2, 3, 4}
 PHASE_BARRIER_PHASES = {1, 3, 4}
 QUESTION_PHASE = 2
@@ -69,6 +69,46 @@ def _require_nonempty_text(path: Path, label: str) -> None:
         raise SessionError(f"{label} is not a file: {path}")
     if not path.read_text(encoding="utf-8").strip():
         raise SessionError(f"{label} is empty: {path}")
+
+
+def _read_text(path: Path, label: str) -> str:
+    _require_nonempty_text(path, label)
+    return path.read_text(encoding="utf-8")
+
+
+def _require_reasoned_answer(path: Path) -> None:
+    text = _read_text(path, "answer")
+    nonempty_lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(nonempty_lines) < 2:
+        raise SessionError(
+            "answer must include at least two non-empty lines: a conclusion and the reasoning behind it"
+        )
+
+
+def _copy_if_needed(src: Path, dst: Path) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if src.resolve() != dst.resolve():
+        shutil.copyfile(src, dst)
+
+
+def _phase_locked_path(session: Path, phase: int) -> Path:
+    return session / "state" / "locked" / "phase-artifacts" / f"phase{phase}.md"
+
+
+def _phase_revealed_path(session: Path, phase: int) -> Path:
+    return session / "coach" / "phase-artifacts" / f"phase{phase}.md"
+
+
+def _question_round_answer_path(session: Path, question_id: str, round_no: int) -> Path:
+    return session / "student" / "answers" / f"{question_id}.round{round_no}.md"
+
+
+def _question_locked_feedback_path(session: Path, question_id: str, round_no: int) -> Path:
+    return session / "state" / "locked" / "feedback" / question_id / f"round{round_no}.md"
+
+
+def _question_revealed_feedback_path(session: Path, question_id: str, round_no: int) -> Path:
+    return session / "coach" / "feedback" / question_id / f"round{round_no}.md"
 
 
 def _write_or_copy(
@@ -119,8 +159,9 @@ def _new_state(
             "status": "in_progress",
             "barrier": {
                 "student_file": None,
-                "coach_file": None,
-                "unlocked": False,
+                "locked_file": None,
+                "revealed_file": None,
+                "revealed": False,
             },
         },
         "2": {"status": "pending", "questions": {}},
@@ -128,16 +169,18 @@ def _new_state(
             "status": "pending",
             "barrier": {
                 "student_file": None,
-                "coach_file": None,
-                "unlocked": False,
+                "locked_file": None,
+                "revealed_file": None,
+                "revealed": False,
             },
         },
         "4": {
             "status": "pending",
             "barrier": {
                 "student_file": None,
-                "coach_file": None,
-                "unlocked": False,
+                "locked_file": None,
+                "revealed_file": None,
+                "revealed": False,
             },
         },
     }
@@ -169,6 +212,15 @@ def init_session(
     if state_path.exists():
         raise SessionError(f"session already exists: {output}")
 
+    materials = list(materials)
+    if not materials:
+        raise SessionError("at least one material path is required")
+    if len(materials) == 1:
+        print(
+            "warning: only one material path was provided; add multiple perspectives when possible",
+            file=sys.stderr,
+        )
+
     for rel in (
         "student/attempts",
         "student/answers",
@@ -176,6 +228,8 @@ def init_session(
         "coach/phase-artifacts",
         "coach/feedback",
         "shared/questions",
+        "state/locked/phase-artifacts",
+        "state/locked/feedback",
         "state",
     ):
         (output / rel).mkdir(parents=True, exist_ok=True)
@@ -185,17 +239,89 @@ def init_session(
     print(f"initialized session: {output}")
 
 
+def _migrate_state(state: Dict[str, Any]) -> Dict[str, Any]:
+    version = state.get("schema_version")
+    if version not in {1, 2, 3}:
+        raise SessionError(
+            f"unsupported session schema: {version}; expected one of [1, 2, 3]"
+        )
+
+    if version in {1, 2}:
+        for phase in PHASE_BARRIER_PHASES:
+            barrier = state["phases"][str(phase)]["barrier"]
+            if version == 1:
+                revealed = barrier.get("unlocked")
+                if revealed is None:
+                    revealed = bool(barrier.get("coach_file"))
+            else:
+                revealed = barrier.get("revealed", False)
+            coach_file = barrier.get("coach_file")
+            if coach_file:
+                barrier["locked_file"] = coach_file.replace("coach/phase-artifacts/", "state/locked/phase-artifacts/")
+                barrier["revealed_file"] = coach_file if revealed else None
+            else:
+                barrier["locked_file"] = None
+                barrier["revealed_file"] = None
+            barrier["revealed"] = bool(revealed)
+            barrier.pop("unlocked", None)
+            barrier.pop("coach_file", None)
+
+        for question in state["phases"][str(QUESTION_PHASE)]["questions"].values():
+            feedback_file = question.get("feedback_file")
+            revealed = question.get("revealed")
+            if revealed is None:
+                revealed = bool(feedback_file and question.get("status") == "reviewed")
+            question.setdefault("round", 1)
+            question.setdefault("completed_round", 0)
+            question.setdefault("rounds", [])
+            answer_file = question.get("answer_file")
+            if answer_file and not question["rounds"]:
+                round_entry = {
+                    "round": 1,
+                    "answer_file": answer_file,
+                    "locked_feedback_file": feedback_file.replace("coach/feedback/", "state/locked/feedback/") if feedback_file else None,
+                    "revealed_feedback_file": feedback_file if revealed else None,
+                    "revealed": bool(revealed),
+                    "submitted_at": question.get("submitted_at"),
+                    "reviewed_at": question.get("reviewed_at"),
+                }
+                question["rounds"].append(round_entry)
+                question["completed_round"] = 1 if feedback_file else 0
+            question.pop("answer_file", None)
+            question.pop("feedback_file", None)
+            question.pop("submitted_at", None)
+            question.pop("reviewed_at", None)
+            question["revealed"] = bool(revealed)
+
+        state["schema_version"] = 3
+
+    state.setdefault("student_persona", "")
+    state.setdefault("coach_persona", "")
+
+    for phase in PHASE_BARRIER_PHASES:
+        barrier = state["phases"][str(phase)]["barrier"]
+        barrier.setdefault("student_file", None)
+        barrier.setdefault("locked_file", None)
+        barrier.setdefault("revealed_file", None)
+        barrier.setdefault("revealed", False)
+
+    for question in state["phases"][str(QUESTION_PHASE)]["questions"].values():
+        question.setdefault("round", 1)
+        question.setdefault("completed_round", 0)
+        question.setdefault("rounds", [])
+        question.setdefault("revealed", False)
+
+    return state
+
+
 def load_state(session: Path) -> Dict[str, Any]:
     state_path = session / "state" / "session.json"
     if not state_path.exists():
         raise SessionError(f"not a session (missing {state_path}): {session}")
-    state = _load_json(state_path)
-    if state.get("schema_version") != SCHEMA_VERSION:
-        raise SessionError(
-            f"unsupported session schema: {state.get('schema_version')}; expected {SCHEMA_VERSION}"
-        )
-    state.setdefault("student_persona", "")
-    state.setdefault("coach_persona", "")
+    original = _load_json(state_path)
+    state = _migrate_state(original)
+    if state != original:
+        _write_json(state_path, state)
     return state
 
 
@@ -212,6 +338,14 @@ def _check_phase(phase: int) -> None:
         raise SessionError(f"phase must be one of {sorted(PHASES)}")
 
 
+def _require_current_phase(state: Dict[str, Any], phase: int, action: str) -> None:
+    current_phase = state.get("current_phase")
+    if current_phase != phase:
+        raise SessionError(
+            f"{action} requires current phase {phase}; current phase is {current_phase}"
+        )
+
+
 def _valid_id(value: str) -> None:
     if not value or not all(ch.isalnum() or ch in "-_" for ch in value):
         raise SessionError("id may only contain letters, digits, hyphens, and underscores")
@@ -223,11 +357,13 @@ def record_attempt(session: Path, phase: int, text: Optional[str], source: Optio
         raise SessionError(f"phase {phase} does not use a phase-level attempt barrier")
 
     state = load_state(session)
+    _require_current_phase(state, phase, "record-attempt")
     phase_data = _phase_state(state, phase)
     dest = session / "student" / "attempts" / f"phase{phase}.md"
     _write_or_copy(dest, text=text, source=source, label="attempt")
     phase_data["barrier"]["student_file"] = str(dest.relative_to(session))
-    phase_data["barrier"]["unlocked"] = False
+    phase_data["barrier"]["revealed"] = False
+    phase_data["barrier"]["revealed_file"] = None
     save_state(session, state)
     print(f"recorded student attempt: {dest.relative_to(session)}")
 
@@ -243,6 +379,7 @@ def save_phase_artifact(
         raise SessionError(f"phase {phase} does not use a phase-level artifact barrier")
 
     state = load_state(session)
+    _require_current_phase(state, phase, "save-phase-artifact")
     phase_data = _phase_state(state, phase)
     barrier = phase_data["barrier"]
     student_file = barrier.get("student_file")
@@ -250,27 +387,34 @@ def save_phase_artifact(
         raise SessionError(f"phase {phase} has no student attempt; record one first")
     _require_nonempty_text(session / student_file, "student attempt")
 
-    dest = session / "coach" / "phase-artifacts" / f"phase{phase}.md"
+    dest = _phase_locked_path(session, phase)
     _write_or_copy(dest, text=text, source=source, label="phase artifact")
-    barrier["coach_file"] = str(dest.relative_to(session))
-    barrier["unlocked"] = True
+    barrier["locked_file"] = str(dest.relative_to(session))
+    barrier["revealed_file"] = None
+    barrier["revealed"] = False
     phase_data["status"] = "reviewed"
     save_state(session, state)
-    print(f"saved coach artifact: {dest.relative_to(session)}")
+    print(f"saved locked coach artifact: {dest.relative_to(session)}")
 
 
 def reveal_phase(session: Path, phase: int) -> None:
     _check_phase(phase)
     state = load_state(session)
+    _require_current_phase(state, phase, "reveal-phase")
     phase_data = _phase_state(state, phase)
     barrier = phase_data["barrier"]
-    if not barrier.get("unlocked") or not barrier.get("coach_file"):
+    if not barrier.get("locked_file"):
         raise SessionError(
             f"phase {phase} is still locked; submit and review the student attempt before revealing coach content"
         )
-    coach_file = session / barrier["coach_file"]
-    _require_nonempty_text(coach_file, "coach artifact")
-    print(coach_file.read_text(encoding="utf-8"), end="")
+    locked_file = session / barrier["locked_file"]
+    _require_nonempty_text(locked_file, "coach artifact")
+    revealed_file = _phase_revealed_path(session, phase)
+    _copy_if_needed(locked_file, revealed_file)
+    barrier["revealed"] = True
+    barrier["revealed_file"] = str(revealed_file.relative_to(session))
+    save_state(session, state)
+    print(revealed_file.read_text(encoding="utf-8"), end="")
 
 
 def start_question(
@@ -282,6 +426,7 @@ def start_question(
 ) -> None:
     _valid_id(question_id)
     state = load_state(session)
+    _require_current_phase(state, QUESTION_PHASE, "start-question")
     questions = _phase_state(state, QUESTION_PHASE)["questions"]
     if question_id in questions:
         raise SessionError(f"question already exists: {question_id}")
@@ -294,11 +439,12 @@ def start_question(
         "title": title.strip(),
         "question_file": str(dest.relative_to(session)),
         "status": "open",
-        "answer_file": None,
-        "feedback_file": None,
-        "submitted_at": None,
-        "reviewed_at": None,
+        "round": 1,
+        "completed_round": 0,
+        "rounds": [],
+        "revealed": False,
     }
+    _phase_state(state, QUESTION_PHASE)["status"] = "in_progress"
     save_state(session, state)
     print(f"started question: {question_id}")
 
@@ -317,17 +463,33 @@ def submit_answer(
     source: Optional[Path],
 ) -> None:
     state = load_state(session)
+    _require_current_phase(state, QUESTION_PHASE, "submit")
     question = _question(state, question_id)
     if question["status"] != "open":
         raise SessionError(f"question {question_id} is already {question['status']}")
 
-    dest = session / "student" / "answers" / f"{question_id}.md"
+    round_no = int(question["round"])
+    dest = _question_round_answer_path(session, question_id, round_no)
     _write_or_copy(dest, text=text, source=source, label="answer")
+    _require_reasoned_answer(dest)
     question["status"] = "submitted"
-    question["answer_file"] = str(dest.relative_to(session))
-    question["submitted_at"] = utcnow()
+    submitted_at = utcnow()
+    rounds = question["rounds"]
+    round_entry = None
+    for existing in rounds:
+        if existing["round"] == round_no:
+            round_entry = existing
+            break
+    if round_entry is None:
+        round_entry = {"round": round_no}
+        rounds.append(round_entry)
+    round_entry["answer_file"] = str(dest.relative_to(session))
+    round_entry["submitted_at"] = submitted_at
+    round_entry.setdefault("locked_feedback_file", None)
+    round_entry.setdefault("revealed_feedback_file", None)
+    round_entry["revealed"] = False
     save_state(session, state)
-    print(f"submitted answer for question: {question_id}")
+    print(f"submitted answer for question: {question_id} round {round_no}")
 
 
 def save_feedback(
@@ -337,56 +499,125 @@ def save_feedback(
     source: Optional[Path],
 ) -> None:
     state = load_state(session)
+    _require_current_phase(state, QUESTION_PHASE, "save-feedback")
     question = _question(state, question_id)
     if question["status"] != "submitted":
         raise SessionError(
             f"question {question_id} is {question['status']}; submit an answer before saving feedback"
         )
 
-    dest = session / "coach" / "feedback" / f"{question_id}.md"
+    round_no = int(question["round"])
+    round_entry = None
+    for existing in question["rounds"]:
+        if existing["round"] == round_no:
+            round_entry = existing
+            break
+    if round_entry is None or not round_entry.get("answer_file"):
+        raise SessionError(f"question {question_id} round {round_no} has no recorded answer")
+
+    dest = _question_locked_feedback_path(session, question_id, round_no)
     _write_or_copy(dest, text=text, source=source, label="feedback")
     question["status"] = "reviewed"
-    question["feedback_file"] = str(dest.relative_to(session))
-    question["reviewed_at"] = utcnow()
+    reviewed_at = utcnow()
+    round_entry["locked_feedback_file"] = str(dest.relative_to(session))
+    round_entry["revealed_feedback_file"] = None
+    round_entry["reviewed_at"] = reviewed_at
+    round_entry["revealed"] = False
+    question["revealed"] = False
     save_state(session, state)
-    print(f"saved feedback for question: {question_id}")
+    print(f"saved locked feedback for question: {question_id} round {round_no}")
 
 
 def reveal_feedback(session: Path, question_id: str) -> None:
     state = load_state(session)
+    _require_current_phase(state, QUESTION_PHASE, "reveal-feedback")
     question = _question(state, question_id)
     if question["status"] != "reviewed":
         raise SessionError(
             f"question {question_id} is {question['status']}; feedback is not available yet"
         )
-    feedback_file = session / question["feedback_file"]
-    _require_nonempty_text(feedback_file, "feedback")
-    print(feedback_file.read_text(encoding="utf-8"), end="")
+    round_no = int(question["round"])
+    round_entry = None
+    for existing in question["rounds"]:
+        if existing["round"] == round_no:
+            round_entry = existing
+            break
+    if round_entry is None or not round_entry.get("locked_feedback_file"):
+        raise SessionError(f"question {question_id} round {round_no} has no locked feedback")
+
+    locked_feedback_file = session / round_entry["locked_feedback_file"]
+    _require_nonempty_text(locked_feedback_file, "feedback")
+    revealed_feedback_file = _question_revealed_feedback_path(session, question_id, round_no)
+    _copy_if_needed(locked_feedback_file, revealed_feedback_file)
+    round_entry["revealed_feedback_file"] = str(revealed_feedback_file.relative_to(session))
+    round_entry["revealed"] = True
+    question["revealed"] = True
+    question["completed_round"] = max(int(question.get("completed_round", 0)), round_no)
+    save_state(session, state)
+    print(revealed_feedback_file.read_text(encoding="utf-8"), end="")
+
+
+def request_followup(session: Path, question_id: str) -> None:
+    state = load_state(session)
+    _require_current_phase(state, QUESTION_PHASE, "request-followup")
+    question = _question(state, question_id)
+    if question["status"] != "reviewed":
+        raise SessionError(
+            f"question {question_id} is {question['status']}; reveal the current feedback before opening a follow-up round"
+        )
+    current_round = int(question["round"])
+    round_entry = None
+    for existing in question["rounds"]:
+        if existing["round"] == current_round:
+            round_entry = existing
+            break
+    if round_entry is None or not round_entry.get("revealed"):
+        raise SessionError(
+            f"question {question_id} round {current_round} feedback must be revealed before opening a follow-up round"
+        )
+    question["round"] = current_round + 1
+    question["status"] = "open"
+    question["revealed"] = False
+    save_state(session, state)
+    print(f"opened follow-up round {question['round']} for question: {question_id}")
 
 
 def finish_phase(session: Path, phase: int) -> None:
     _check_phase(phase)
     state = load_state(session)
+    _require_current_phase(state, phase, "finish-phase")
     phase_data = _phase_state(state, phase)
 
     if phase in PHASE_BARRIER_PHASES:
-        if not phase_data["barrier"].get("unlocked"):
+        if not phase_data["barrier"].get("revealed"):
             raise SessionError(
-                f"phase {phase} is not complete; the student attempt must be reviewed first"
+                f"phase {phase} is not complete; reveal the reviewed coach artifact first"
             )
     elif phase == QUESTION_PHASE:
         questions = phase_data["questions"]
-        if not questions:
-            raise SessionError("phase 2 has no questions")
+        if len(questions) < 10:
+            raise SessionError("phase 2 requires at least 10 questions before completion")
+        for question in questions.values():
+            if int(question.get("round", 1)) != int(question.get("completed_round", 0)):
+                raise SessionError(
+                    f"question {question['id']} has an open follow-up round; close it before finishing phase 2"
+                )
         for question in questions.values():
             if question["status"] != "reviewed":
                 raise SessionError(
                     f"question {question['id']} is {question['status']}; all questions must be reviewed"
                 )
+            if not question.get("revealed"):
+                raise SessionError(
+                    f"question {question['id']} feedback has not been revealed yet"
+                )
 
     phase_data["status"] = "completed"
     if phase < 4:
         state["current_phase"] = phase + 1
+        next_phase = _phase_state(state, phase + 1)
+        if next_phase["status"] == "pending":
+            next_phase["status"] = "in_progress"
     else:
         state["current_phase"] = None
     save_state(session, state)
@@ -411,20 +642,21 @@ def export_session(session: Path, output: Path) -> None:
     for phase, phase_data in state["phases"].items():
         if phase in {str(p) for p in PHASE_BARRIER_PHASES}:
             barrier = phase_data["barrier"]
-            if barrier.get("unlocked") and barrier.get("coach_file"):
-                coach_src = session / barrier["coach_file"]
+            if barrier.get("revealed") and barrier.get("revealed_file"):
+                coach_src = session / barrier["revealed_file"]
                 _require_nonempty_text(coach_src, "coach artifact")
-                coach_dst = output / barrier["coach_file"]
+                coach_dst = output / barrier["revealed_file"]
                 coach_dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(coach_src, coach_dst)
         elif phase == str(QUESTION_PHASE):
             for question in phase_data["questions"].values():
-                if question["status"] == "reviewed" and question.get("feedback_file"):
-                    feedback_src = session / question["feedback_file"]
-                    _require_nonempty_text(feedback_src, "feedback")
-                    feedback_dst = output / question["feedback_file"]
-                    feedback_dst.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copyfile(feedback_src, feedback_dst)
+                for round_entry in question.get("rounds", []):
+                    if round_entry.get("revealed") and round_entry.get("revealed_feedback_file"):
+                        feedback_src = session / round_entry["revealed_feedback_file"]
+                        _require_nonempty_text(feedback_src, "feedback")
+                        feedback_dst = output / round_entry["revealed_feedback_file"]
+                        feedback_dst.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copyfile(feedback_src, feedback_dst)
 
     _write_json(output / "state" / "session.json", state)
     print(f"exported unlocked session content to: {output}")
@@ -434,29 +666,199 @@ def check_session(session: Path) -> None:
     state = load_state(session)
     errors = []
 
+    for material in state["materials"]:
+        material_path = Path(material["path"])
+        if not material_path.exists():
+            errors.append(f"material is missing: {material_path}")
+            continue
+        if material["type"] == "file":
+            current_hash = _sha256_file(material_path)
+            if current_hash != material.get("sha256"):
+                errors.append(f"material changed since init: {material_path}")
+
     for phase in PHASES:
         phase_data = _phase_state(state, phase)
         if phase in PHASE_BARRIER_PHASES:
             barrier = phase_data["barrier"]
             student_file = barrier.get("student_file")
-            coach_file = barrier.get("coach_file")
-            if barrier.get("unlocked") and (not student_file or not coach_file):
-                errors.append(f"phase {phase} is unlocked but missing a barrier path")
-            if coach_file and not barrier.get("unlocked"):
-                errors.append(f"phase {phase} has coach content while still locked")
+            locked_file = barrier.get("locked_file")
+            revealed_file = barrier.get("revealed_file")
+            if barrier.get("revealed") and (not student_file or not locked_file or not revealed_file):
+                errors.append(f"phase {phase} is revealed but missing a barrier path")
+            if student_file and not (session / student_file).exists():
+                errors.append(f"phase {phase} student attempt is missing on disk")
+            if locked_file and not (session / locked_file).exists():
+                errors.append(f"phase {phase} locked coach artifact is missing on disk")
+            if revealed_file and not (session / revealed_file).exists():
+                errors.append(f"phase {phase} revealed coach artifact is missing on disk")
         elif phase == QUESTION_PHASE:
             for question in phase_data["questions"].values():
-                if question["status"] == "reviewed" and not question.get("answer_file"):
+                for round_entry in question.get("rounds", []):
+                    answer_file = round_entry.get("answer_file")
+                    locked_feedback_file = round_entry.get("locked_feedback_file")
+                    revealed_feedback_file = round_entry.get("revealed_feedback_file")
+                    if locked_feedback_file and not answer_file:
+                        errors.append(f"question {question['id']} round {round_entry['round']} has feedback without an answer")
+                    if answer_file and not (session / answer_file).exists():
+                        errors.append(f"question {question['id']} round {round_entry['round']} answer is missing on disk")
+                    if locked_feedback_file and not (session / locked_feedback_file).exists():
+                        errors.append(f"question {question['id']} round {round_entry['round']} locked feedback is missing on disk")
+                    if round_entry.get("revealed") and not revealed_feedback_file:
+                        errors.append(f"question {question['id']} round {round_entry['round']} is revealed without a revealed feedback path")
+                    if revealed_feedback_file and not (session / revealed_feedback_file).exists():
+                        errors.append(f"question {question['id']} round {round_entry['round']} revealed feedback is missing on disk")
+                if question["status"] == "reviewed" and not question.get("rounds"):
                     errors.append(f"question {question['id']} is reviewed without an answer")
-                if question.get("feedback_file") and question["status"] != "reviewed":
-                    errors.append(f"question {question['id']} has feedback but is not reviewed")
+                if question.get("revealed") and question["status"] != "reviewed":
+                    errors.append(f"question {question['id']} is revealed without reviewed feedback")
+
+    expected_phase_artifacts = {
+        phase_data["barrier"]["revealed_file"]
+        for phase in PHASE_BARRIER_PHASES
+        for phase_data in [_phase_state(state, phase)]
+        if phase_data["barrier"].get("revealed_file")
+    }
+    actual_phase_artifacts = {
+        str(path.relative_to(session))
+        for path in (session / "coach" / "phase-artifacts").rglob("*.md")
+    }
+    for unexpected in sorted(actual_phase_artifacts - expected_phase_artifacts):
+        errors.append(f"untracked coach artifact on disk: {unexpected}")
+
+    expected_feedback = {
+        round_entry["revealed_feedback_file"]
+        for question in _phase_state(state, QUESTION_PHASE)["questions"].values()
+        for round_entry in question.get("rounds", [])
+        if round_entry.get("revealed_feedback_file")
+    }
+    actual_feedback = {
+        str(path.relative_to(session))
+        for path in (session / "coach" / "feedback").rglob("*.md")
+    }
+    for unexpected in sorted(actual_feedback - expected_feedback):
+        errors.append(f"untracked coach feedback on disk: {unexpected}")
+
+    locked_phase_artifacts = {
+        phase_data["barrier"]["locked_file"]
+        for phase in PHASE_BARRIER_PHASES
+        for phase_data in [_phase_state(state, phase)]
+        if phase_data["barrier"].get("locked_file")
+    }
+    actual_locked_phase_artifacts = {
+        str(path.relative_to(session))
+        for path in (session / "state" / "locked" / "phase-artifacts").rglob("*.md")
+    }
+    for unexpected in sorted(actual_locked_phase_artifacts - locked_phase_artifacts):
+        errors.append(f"untracked locked phase artifact on disk: {unexpected}")
+
+    locked_feedback = {
+        round_entry["locked_feedback_file"]
+        for question in _phase_state(state, QUESTION_PHASE)["questions"].values()
+        for round_entry in question.get("rounds", [])
+        if round_entry.get("locked_feedback_file")
+    }
+    actual_locked_feedback = {
+        str(path.relative_to(session))
+        for path in (session / "state" / "locked" / "feedback").rglob("*.md")
+    }
+    for unexpected in sorted(actual_locked_feedback - locked_feedback):
+        errors.append(f"untracked locked feedback on disk: {unexpected}")
 
     if errors:
         raise SessionError("; ".join(errors))
     print("session integrity check passed")
 
 
-def _status_dict(state: Dict[str, Any], session: Path) -> Dict[str, Any]:
+def next_step(session: Path) -> None:
+    state = load_state(session)
+    current_phase = state.get("current_phase")
+    if current_phase is None:
+        print("session is complete; use export to capture unlocked artifacts")
+        return
+
+    if current_phase in PHASE_BARRIER_PHASES:
+        barrier = _phase_state(state, current_phase)["barrier"]
+        if not barrier.get("student_file"):
+            print(
+                f"next: record the student attempt for phase {current_phase}\n"
+                f"command: python3 \"$SKILL_DIR/scripts/session.py\" record-attempt --session .rdm --phase {current_phase} --from-file student/attempts/phase{current_phase}.md"
+            )
+            return
+        if not barrier.get("locked_file"):
+            print(
+                f"next: save the coach artifact for phase {current_phase}\n"
+                f"command: python3 \"$SKILL_DIR/scripts/session.py\" save-phase-artifact --session .rdm --phase {current_phase} --from-file coach/phase-artifacts/phase{current_phase}.md"
+            )
+            return
+        if not barrier.get("revealed"):
+            print(
+                f"next: reveal the coach artifact for phase {current_phase}\n"
+                f"command: python3 \"$SKILL_DIR/scripts/session.py\" reveal-phase --session .rdm --phase {current_phase}"
+            )
+            return
+        print(
+            f"next: finish phase {current_phase}\n"
+            f"command: python3 \"$SKILL_DIR/scripts/session.py\" finish-phase --session .rdm --phase {current_phase}"
+        )
+        return
+
+    questions = _phase_state(state, QUESTION_PHASE)["questions"]
+    if len(questions) < 10:
+        next_id = f"q{len(questions) + 1:02d}"
+        print(
+            "next: create the remaining phase 2 questions until you have 10\n"
+            f"command: python3 \"$SKILL_DIR/scripts/session.py\" start-question --session .rdm --id {next_id} --title \"Question {len(questions) + 1}\" --from-file shared/questions/{next_id}.md"
+        )
+        return
+
+    submitted = [qid for qid, q in questions.items() if q["status"] == "submitted"]
+    if submitted:
+        qid = sorted(submitted)[0]
+        print(
+            f"next: save coach feedback for {qid}\n"
+            f"command: python3 \"$SKILL_DIR/scripts/session.py\" save-feedback --session .rdm --id {qid} --from-file coach/feedback/{qid}.md"
+        )
+        return
+
+    reviewed_hidden = [qid for qid, q in questions.items() if q["status"] == "reviewed" and not q.get("revealed")]
+    if reviewed_hidden:
+        qid = sorted(reviewed_hidden)[0]
+        print(
+            f"next: reveal coach feedback for {qid}\n"
+            f"command: python3 \"$SKILL_DIR/scripts/session.py\" reveal-feedback --session .rdm --id {qid}"
+        )
+        return
+
+    reviewed_followup_ready = [
+        qid
+        for qid, q in questions.items()
+        if q["status"] == "reviewed" and q.get("revealed") and int(q.get("completed_round", 0)) == int(q.get("round", 1))
+    ]
+    if reviewed_followup_ready:
+        qid = sorted(reviewed_followup_ready)[0]
+        next_round = int(questions[qid]["round"]) + 1
+        print(
+            f"next: open follow-up round {next_round} for {qid} if the coach asked a追问\n"
+            f"command: python3 \"$SKILL_DIR/scripts/session.py\" request-followup --session .rdm --id {qid}"
+        )
+        return
+
+    open_questions = [qid for qid, q in questions.items() if q["status"] == "open"]
+    if open_questions:
+        qid = sorted(open_questions)[0]
+        print(
+            f"next: submit the learner answer for {qid}\n"
+            f"command: python3 \"$SKILL_DIR/scripts/session.py\" submit --session .rdm --id {qid} --from-file student/answers/{qid}.md"
+        )
+        return
+
+    print(
+        "next: finish phase 2\n"
+        "command: python3 \"$SKILL_DIR/scripts/session.py\" finish-phase --session .rdm --phase 2"
+    )
+
+
+def _status_dict(state: Dict[str, Any]) -> Dict[str, Any]:
     summary = {
         "id": state["id"],
         "goal": state["goal"],
@@ -474,7 +876,12 @@ def _status_dict(state: Dict[str, Any], session: Path) -> Dict[str, Any]:
                 "status": phase_data["status"],
                 "question_count": len(questions),
                 "questions": {
-                    qid: q["status"] for qid, q in questions.items()
+                    qid: {
+                        "status": q["status"],
+                        "round": q.get("round", 1),
+                        "completed_round": q.get("completed_round", 0),
+                    }
+                    for qid, q in questions.items()
                 },
             }
         else:
@@ -482,9 +889,10 @@ def _status_dict(state: Dict[str, Any], session: Path) -> Dict[str, Any]:
             summary["phases"][str(phase)] = {
                 "status": phase_data["status"],
                 "barrier": {
-                    "unlocked": barrier.get("unlocked", False),
+                    "revealed": barrier.get("revealed", False),
                     "student_file": barrier.get("student_file"),
-                    "coach_file": barrier.get("coach_file"),
+                    "locked_file": barrier.get("locked_file"),
+                    "revealed_file": barrier.get("revealed_file"),
                 },
             }
     return summary
@@ -492,7 +900,7 @@ def _status_dict(state: Dict[str, Any], session: Path) -> Dict[str, Any]:
 
 def status_session(session: Path) -> None:
     state = load_state(session)
-    print(json.dumps(_status_dict(state, session), indent=2, sort_keys=True))
+    print(json.dumps(_status_dict(state), indent=2, sort_keys=True))
 
 
 def _add_session_arg(parser: argparse.ArgumentParser) -> None:
@@ -530,6 +938,9 @@ def build_parser() -> argparse.ArgumentParser:
     check = sub.add_parser("check", help="check session integrity")
     _add_session_arg(check)
 
+    next_cmd = sub.add_parser("next", help="show the next recommended session command")
+    _add_session_arg(next_cmd)
+
     record = sub.add_parser("record-attempt", help="record a phase-level student attempt")
     _add_session_arg(record)
     record.add_argument("--phase", type=int, required=True)
@@ -564,6 +975,10 @@ def build_parser() -> argparse.ArgumentParser:
     _add_session_arg(reveal_feedback_cmd)
     reveal_feedback_cmd.add_argument("--id", dest="question_id", required=True)
 
+    request_followup_cmd = sub.add_parser("request-followup", help="open a new follow-up round after revealed feedback")
+    _add_session_arg(request_followup_cmd)
+    request_followup_cmd.add_argument("--id", dest="question_id", required=True)
+
     finish = sub.add_parser("finish-phase", help="mark a phase complete")
     _add_session_arg(finish)
     finish.add_argument("--phase", type=int, required=True)
@@ -594,6 +1009,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             status_session(Path(args.session))
         elif command == "check":
             check_session(Path(args.session))
+        elif command == "next":
+            next_step(Path(args.session))
         elif command == "record-attempt":
             record_attempt(Path(args.session), args.phase, args.text, args.source)
         elif command == "save-phase-artifact":
@@ -608,6 +1025,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             save_feedback(Path(args.session), args.question_id, args.text, args.source)
         elif command == "reveal-feedback":
             reveal_feedback(Path(args.session), args.question_id)
+        elif command == "request-followup":
+            request_followup(Path(args.session), args.question_id)
         elif command == "finish-phase":
             finish_phase(Path(args.session), args.phase)
         elif command == "export":

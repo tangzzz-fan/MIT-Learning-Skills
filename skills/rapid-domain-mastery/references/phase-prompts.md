@@ -44,7 +44,7 @@
    每个节点标注承重属性：移除它是否会导致结构崩塌？
 ```
 
-输出保存到 `coach/phase-artifacts/phase1.md`，再按协议解锁。
+输出先保存到锁定区，再按协议解锁到 `coach/phase-artifacts/phase1.md`。
 
 ## Phase 2：认知压力测试
 
@@ -63,7 +63,7 @@
 只输出题目本身、场景和作答格式说明，不输出答案、判断或推理。
 ```
 
-学生提交 `student/answers/{id}.md` 后，教练再生成 `coach/feedback/{id}.md`：
+学生提交 `student/answers/{id}.round{n}.md` 后，教练再生成当前轮反馈。反馈先保存到锁定区，只有 reveal 后才会出现在 `coach/feedback/{id}/round{n}.md`：
 
 ```text
 你是{coach_persona}。学生已经提交答案，请按以下格式反馈：
@@ -75,7 +75,7 @@
 4. 【追问】基于错误生成一个更深入的追问，迫使学生换角度重想。
 5. 【修正后的完整推理】不直接给答案，给出修正后的推理路径，让学生自己推出正确结论。
 
-在学生对追问作出新的回答前，不要进入下一题。
+如果你给出了【追问】，在学生先 `reveal-feedback` 并对该追问作出新的回答前，不要进入下一题。下一轮答案和反馈要分别记录为新的 round，而不是覆盖上一轮。
 ```
 
 ## Phase 3：边界探索与迁移验证
@@ -87,7 +87,7 @@
 3. 用不超过 400 字向非专业人士解释该领域价值。
 4. 从开放问题中提出两个可动手验证的小问题。
 
-教练再生成 `coach/phase-artifacts/phase3.md`，检查：
+教练再生成锁定的 Phase 3 产物，解锁后显示到 `coach/phase-artifacts/phase3.md`，检查：
 
 ```text
 你是{coach_persona}。检查学生的边界探索是否满足迁移标准：
@@ -102,7 +102,7 @@
 
 ## Phase 4：个人知识资产固化
 
-学生先写 `student/attempts/phase4.md`，包含个人概念图、错题分类、速查卡初稿。教练再生成 `coach/phase-artifacts/phase4.md`，对学生的资产做补漏和校对。
+学生先写 `student/attempts/phase4.md`，包含个人概念图、错题分类、速查卡初稿。教练再生成锁定的 Phase 4 产物，解锁后显示到 `coach/phase-artifacts/phase4.md`，对学生的资产做补漏和校对。
 
 ```text
 你是{coach_persona}。综合前面所有阶段，帮助学生固化知识资产：

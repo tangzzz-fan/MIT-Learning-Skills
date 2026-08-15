@@ -53,6 +53,41 @@ class SessionCliTest(unittest.TestCase):
             str(self.material),
         )
 
+    def advance_to_phase_2(self):
+        self.init_session()
+        self.run_cli(
+            "record-attempt",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "1",
+            "--text",
+            "my framework",
+        )
+        self.run_cli(
+            "save-phase-artifact",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "1",
+            "--text",
+            "coach skeleton",
+        )
+        self.run_cli(
+            "reveal-phase",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "1",
+        )
+        self.run_cli(
+            "finish-phase",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "1",
+        )
+
     def test_init_personas_default_to_empty_and_are_reported(self):
         self.init_session()
         state = session.load_state(self.session_dir)
@@ -109,7 +144,7 @@ class SessionCliTest(unittest.TestCase):
             self.assertTrue((self.session_dir / rel).is_dir(), rel)
 
         state = json.loads((self.session_dir / "state" / "session.json").read_text(encoding="utf-8"))
-        self.assertEqual(state["schema_version"], 1)
+        self.assertEqual(state["schema_version"], 3)
         self.assertEqual(state["materials"][0]["name"], "material.md")
         self.assertTrue(state["materials"][0]["sha256"])
 
@@ -154,9 +189,28 @@ class SessionCliTest(unittest.TestCase):
             "1",
         )
         self.assertIn("coach skeleton", revealed.stdout)
+        self.assertTrue((self.session_dir / "state" / "locked" / "phase-artifacts" / "phase1.md").exists())
+        self.assertTrue((self.session_dir / "coach" / "phase-artifacts" / "phase1.md").exists())
+
+    def test_phase_two_cannot_start_before_phase_one_is_complete(self):
+        self.init_session()
+        result = self.run_cli(
+            "start-question",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "q01",
+            "--title",
+            "Q1",
+            "--text",
+            "Question?",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("current phase 2", result.stderr)
 
     def test_feedback_requires_submitted_answer(self):
-        self.init_session()
+        self.advance_to_phase_2()
         self.run_cli(
             "start-question",
             "--session",
@@ -199,7 +253,7 @@ class SessionCliTest(unittest.TestCase):
             "--id",
             "q01",
             "--text",
-            "my answer with reasoning",
+            "结论：这是我的答案\n推理：这是我的推理",
         )
         self.run_cli(
             "save-feedback",
@@ -210,6 +264,8 @@ class SessionCliTest(unittest.TestCase):
             "--text",
             "feedback",
         )
+        self.assertTrue((self.session_dir / "state" / "locked" / "feedback" / "q01" / "round1.md").exists())
+        self.assertFalse((self.session_dir / "coach" / "feedback" / "q01" / "round1.md").exists())
         revealed = self.run_cli(
             "reveal-feedback",
             "--session",
@@ -218,9 +274,36 @@ class SessionCliTest(unittest.TestCase):
             "q01",
         )
         self.assertIn("feedback", revealed.stdout)
+        self.assertTrue((self.session_dir / "coach" / "feedback" / "q01" / "round1.md").exists())
+
+    def test_submit_requires_reasoning_structure(self):
+        self.advance_to_phase_2()
+        self.run_cli(
+            "start-question",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "q01",
+            "--title",
+            "Q1",
+            "--text",
+            "Question?",
+        )
+        result = self.run_cli(
+            "submit",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "q01",
+            "--text",
+            "just the answer",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("two non-empty lines", result.stderr)
 
     def test_export_excludes_locked_coach_feedback(self):
-        self.init_session()
+        self.advance_to_phase_2()
         self.run_cli(
             "start-question",
             "--session",
@@ -239,7 +322,16 @@ class SessionCliTest(unittest.TestCase):
             "--id",
             "q01",
             "--text",
-            "answer",
+            "结论：answer\n推理：because",
+        )
+        self.run_cli(
+            "save-feedback",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "q01",
+            "--text",
+            "feedback",
         )
 
         export_dir = Path(self.tmp.name) / "export"
@@ -250,11 +342,65 @@ class SessionCliTest(unittest.TestCase):
             "--output",
             str(export_dir),
         )
-        self.assertTrue((export_dir / "student" / "answers" / "q01.md").exists())
-        self.assertFalse((export_dir / "coach" / "feedback" / "q01.md").exists())
+        self.assertTrue((export_dir / "student" / "answers" / "q01.round1.md").exists())
+        self.assertFalse((export_dir / "coach" / "feedback" / "q01" / "round1.md").exists())
+
+    def test_export_excludes_saved_phase_artifact_until_revealed(self):
+        self.init_session()
+        self.run_cli(
+            "record-attempt",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "1",
+            "--text",
+            "my framework",
+        )
+        self.run_cli(
+            "save-phase-artifact",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "1",
+            "--text",
+            "coach skeleton",
+        )
+
+        export_dir = Path(self.tmp.name) / "phase-export"
+        self.run_cli(
+            "export",
+            "--session",
+            str(self.session_dir),
+            "--output",
+            str(export_dir),
+        )
+        self.assertFalse((export_dir / "coach" / "phase-artifacts" / "phase1.md").exists())
+
+    def test_locked_phase_artifact_stays_out_of_coach_until_revealed(self):
+        self.init_session()
+        self.run_cli(
+            "record-attempt",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "1",
+            "--text",
+            "my framework",
+        )
+        self.run_cli(
+            "save-phase-artifact",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "1",
+            "--text",
+            "coach skeleton",
+        )
+        self.assertTrue((self.session_dir / "state" / "locked" / "phase-artifacts" / "phase1.md").exists())
+        self.assertFalse((self.session_dir / "coach" / "phase-artifacts" / "phase1.md").exists())
 
     def test_check_rejects_reviewed_question_without_answer(self):
-        self.init_session()
+        self.advance_to_phase_2()
         self.run_cli(
             "start-question",
             "--session",
@@ -270,11 +416,318 @@ class SessionCliTest(unittest.TestCase):
         state = session.load_state(self.session_dir)
         question = state["phases"]["2"]["questions"]["q01"]
         question["status"] = "reviewed"
+        question["rounds"] = []
+        question["revealed"] = True
         session.save_state(self.session_dir, state)
 
         result = self.run_cli("check", "--session", str(self.session_dir), check=False)
         self.assertEqual(result.returncode, 1)
         self.assertIn("reviewed without an answer", result.stderr)
+
+    def test_check_rejects_untracked_coach_file_and_changed_material(self):
+        self.init_session()
+        self.material.write_text("# changed\n", encoding="utf-8")
+        leaked = self.session_dir / "coach" / "feedback" / "q99" / "round1.md"
+        leaked.parent.mkdir(parents=True, exist_ok=True)
+        leaked.write_text("leak", encoding="utf-8")
+
+        result = self.run_cli("check", "--session", str(self.session_dir), check=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("material changed since init", result.stderr)
+        self.assertIn("untracked coach feedback on disk", result.stderr)
+
+    def test_check_rejects_untracked_locked_feedback_file(self):
+        self.advance_to_phase_2()
+        leaked = self.session_dir / "state" / "locked" / "feedback" / "q99" / "round1.md"
+        leaked.parent.mkdir(parents=True, exist_ok=True)
+        leaked.write_text("leak", encoding="utf-8")
+
+        result = self.run_cli("check", "--session", str(self.session_dir), check=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("untracked locked feedback on disk", result.stderr)
+
+    def test_finish_phase_two_requires_ten_revealed_questions(self):
+        self.advance_to_phase_2()
+        for idx in range(1, 10):
+            qid = f"q{idx:02d}"
+            self.run_cli(
+                "start-question",
+                "--session",
+                str(self.session_dir),
+                "--id",
+                qid,
+                "--title",
+                qid,
+                "--text",
+                f"Question {idx}?",
+            )
+            self.run_cli(
+                "submit",
+                "--session",
+                str(self.session_dir),
+                "--id",
+                qid,
+                "--text",
+                f"结论：{qid}\n推理：because {qid}",
+            )
+            self.run_cli(
+                "save-feedback",
+                "--session",
+                str(self.session_dir),
+                "--id",
+                qid,
+                "--text",
+                f"feedback {qid}",
+            )
+            self.run_cli(
+                "reveal-feedback",
+                "--session",
+                str(self.session_dir),
+                "--id",
+                qid,
+            )
+
+        result = self.run_cli(
+            "finish-phase",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "2",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("at least 10 questions", result.stderr)
+
+    def test_next_surfaces_reveal_step_before_finish(self):
+        self.init_session()
+        self.run_cli(
+            "record-attempt",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "1",
+            "--text",
+            "my framework",
+        )
+        self.run_cli(
+            "save-phase-artifact",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "1",
+            "--text",
+            "coach skeleton",
+        )
+
+        result = self.run_cli("next", "--session", str(self.session_dir))
+        self.assertIn("reveal-phase", result.stdout)
+
+    def test_request_followup_opens_new_round(self):
+        self.advance_to_phase_2()
+        self.run_cli(
+            "start-question",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "q01",
+            "--title",
+            "Q1",
+            "--text",
+            "Question?",
+        )
+        self.run_cli(
+            "submit",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "q01",
+            "--text",
+            "结论：A1\n推理：R1",
+        )
+        self.run_cli(
+            "save-feedback",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "q01",
+            "--text",
+            "追问：再想一层",
+        )
+        self.run_cli(
+            "reveal-feedback",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "q01",
+        )
+        self.run_cli(
+            "request-followup",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "q01",
+        )
+
+        state = session.load_state(self.session_dir)
+        q01 = state["phases"]["2"]["questions"]["q01"]
+        self.assertEqual(q01["status"], "open")
+        self.assertEqual(q01["round"], 2)
+        self.assertEqual(q01["completed_round"], 1)
+
+    def test_followup_round_creates_round_specific_files(self):
+        self.advance_to_phase_2()
+        self.run_cli(
+            "start-question",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "q01",
+            "--title",
+            "Q1",
+            "--text",
+            "Question?",
+        )
+        self.run_cli(
+            "submit",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "q01",
+            "--text",
+            "结论：A1\n推理：R1",
+        )
+        self.run_cli("save-feedback", "--session", str(self.session_dir), "--id", "q01", "--text", "F1")
+        self.run_cli("reveal-feedback", "--session", str(self.session_dir), "--id", "q01")
+        self.run_cli("request-followup", "--session", str(self.session_dir), "--id", "q01")
+        self.run_cli(
+            "submit",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "q01",
+            "--text",
+            "结论：A2\n推理：R2",
+        )
+        self.run_cli("save-feedback", "--session", str(self.session_dir), "--id", "q01", "--text", "F2")
+        self.run_cli("reveal-feedback", "--session", str(self.session_dir), "--id", "q01")
+
+        self.assertTrue((self.session_dir / "student" / "answers" / "q01.round1.md").exists())
+        self.assertTrue((self.session_dir / "student" / "answers" / "q01.round2.md").exists())
+        self.assertTrue((self.session_dir / "coach" / "feedback" / "q01" / "round1.md").exists())
+        self.assertTrue((self.session_dir / "coach" / "feedback" / "q01" / "round2.md").exists())
+
+    def test_finish_phase_two_rejects_open_followup_round(self):
+        self.advance_to_phase_2()
+        for idx in range(1, 11):
+            qid = f"q{idx:02d}"
+            self.run_cli(
+                "start-question",
+                "--session",
+                str(self.session_dir),
+                "--id",
+                qid,
+                "--title",
+                qid,
+                "--text",
+                f"Question {idx}?",
+            )
+            self.run_cli(
+                "submit",
+                "--session",
+                str(self.session_dir),
+                "--id",
+                qid,
+                "--text",
+                f"结论：{qid}\n推理：because {qid}",
+            )
+            self.run_cli(
+                "save-feedback",
+                "--session",
+                str(self.session_dir),
+                "--id",
+                qid,
+                "--text",
+                f"feedback {qid}",
+            )
+            self.run_cli(
+                "reveal-feedback",
+                "--session",
+                str(self.session_dir),
+                "--id",
+                qid,
+            )
+
+        self.run_cli("request-followup", "--session", str(self.session_dir), "--id", "q01")
+        result = self.run_cli(
+            "finish-phase",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "2",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("open follow-up round", result.stderr)
+
+    def test_next_suggests_followup_when_feedback_is_revealed(self):
+        self.advance_to_phase_2()
+        for idx in range(1, 11):
+            qid = f"q{idx:02d}"
+            self.run_cli(
+                "start-question",
+                "--session",
+                str(self.session_dir),
+                "--id",
+                qid,
+                "--title",
+                qid,
+                "--text",
+                f"Question {idx}?",
+            )
+            self.run_cli(
+                "submit",
+                "--session",
+                str(self.session_dir),
+                "--id",
+                qid,
+                "--text",
+                f"结论：{qid}\n推理：because {qid}",
+            )
+            self.run_cli(
+                "save-feedback",
+                "--session",
+                str(self.session_dir),
+                "--id",
+                qid,
+                "--text",
+                f"feedback {qid}",
+            )
+            self.run_cli(
+                "reveal-feedback",
+                "--session",
+                str(self.session_dir),
+                "--id",
+                qid,
+            )
+
+        result = self.run_cli("next", "--session", str(self.session_dir))
+        self.assertIn("request-followup", result.stdout)
+
+    def test_load_state_migrates_v1_schema(self):
+        self.init_session()
+        state = json.loads((self.session_dir / "state" / "session.json").read_text(encoding="utf-8"))
+        state["schema_version"] = 1
+        state["phases"]["1"]["barrier"]["unlocked"] = False
+        state["phases"]["1"]["barrier"].pop("revealed", None)
+        (self.session_dir / "state" / "session.json").write_text(
+            json.dumps(state, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+        migrated = session.load_state(self.session_dir)
+        self.assertEqual(migrated["schema_version"], 3)
+        self.assertIn("revealed", migrated["phases"]["1"]["barrier"])
+        self.assertIn("locked_file", migrated["phases"]["1"]["barrier"])
 
 
 if __name__ == "__main__":
