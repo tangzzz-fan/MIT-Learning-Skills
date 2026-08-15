@@ -62,12 +62,8 @@
 - `save-task-feedback`
 - `reveal-task-feedback`
 - `request-task-followup`
-- `start-exec-task`
-- `submit-exec-artifact`
-- `run-exec-check`
-- `save-exec-feedback`
-- `reveal-exec-feedback`
-- `request-exec-followup`
+
+统一方式：用 `--phase 2/3/4` 区分当前在做红灯任务、迁移任务还是回归用例。
 
 其中：
 

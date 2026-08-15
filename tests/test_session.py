@@ -231,6 +231,8 @@ class SessionCliTest(unittest.TestCase):
             "start-task",
             "--session",
             str(self.session_dir),
+            "--phase",
+            "2",
             "--id",
             "t01",
             "--title",
@@ -244,6 +246,8 @@ class SessionCliTest(unittest.TestCase):
             "submit-artifact",
             "--session",
             str(self.session_dir),
+            "--phase",
+            "2",
             "--id",
             "t01",
             "--text",
@@ -253,6 +257,8 @@ class SessionCliTest(unittest.TestCase):
             "run-check",
             "--session",
             str(self.session_dir),
+            "--phase",
+            "2",
             "--id",
             "t01",
         )
@@ -270,6 +276,8 @@ class SessionCliTest(unittest.TestCase):
             "start-task",
             "--session",
             str(self.session_dir),
+            "--phase",
+            "2",
             "--id",
             "t01",
             "--title",
@@ -283,6 +291,8 @@ class SessionCliTest(unittest.TestCase):
             "submit-artifact",
             "--session",
             str(self.session_dir),
+            "--phase",
+            "2",
             "--id",
             "t01",
             "--text",
@@ -297,6 +307,8 @@ class SessionCliTest(unittest.TestCase):
             "start-task",
             "--session",
             str(self.session_dir),
+            "--phase",
+            "2",
             "--id",
             "t01",
             "--title",
@@ -310,6 +322,8 @@ class SessionCliTest(unittest.TestCase):
             "submit-artifact",
             "--session",
             str(self.session_dir),
+            "--phase",
+            "2",
             "--id",
             "t01",
             "--text",
@@ -319,6 +333,8 @@ class SessionCliTest(unittest.TestCase):
             "save-task-feedback",
             "--session",
             str(self.session_dir),
+            "--phase",
+            "2",
             "--id",
             "t01",
             "--text",
@@ -334,6 +350,8 @@ class SessionCliTest(unittest.TestCase):
             "start-task",
             "--session",
             str(self.session_dir),
+            "--phase",
+            "2",
             "--id",
             "t01",
             "--title",
@@ -347,16 +365,20 @@ class SessionCliTest(unittest.TestCase):
             "submit-artifact",
             "--session",
             str(self.session_dir),
+            "--phase",
+            "2",
             "--id",
             "t01",
             "--text",
             "patch",
         )
-        self.run_cli("run-check", "--session", str(self.session_dir), "--id", "t01")
+        self.run_cli("run-check", "--session", str(self.session_dir), "--phase", "2", "--id", "t01")
         self.run_cli(
             "save-task-feedback",
             "--session",
             str(self.session_dir),
+            "--phase",
+            "2",
             "--id",
             "t01",
             "--text",
@@ -372,6 +394,8 @@ class SessionCliTest(unittest.TestCase):
             "reveal-task-feedback",
             "--session",
             str(self.session_dir),
+            "--phase",
+            "2",
             "--id",
             "t01",
         )
@@ -407,7 +431,7 @@ class SessionCliTest(unittest.TestCase):
             "3",
         )
         self.run_cli(
-            "start-exec-task",
+            "start-task",
             "--session",
             str(self.session_dir),
             "--phase",
@@ -422,7 +446,7 @@ class SessionCliTest(unittest.TestCase):
             "Migrate the example to a constrained runtime.",
         )
         self.run_cli(
-            "submit-exec-artifact",
+            "submit-artifact",
             "--session",
             str(self.session_dir),
             "--phase",
@@ -433,7 +457,7 @@ class SessionCliTest(unittest.TestCase):
             "patch",
         )
         self.run_cli(
-            "run-exec-check",
+            "run-check",
             "--session",
             str(self.session_dir),
             "--phase",
@@ -442,7 +466,7 @@ class SessionCliTest(unittest.TestCase):
             "m01",
         )
         self.run_cli(
-            "save-exec-feedback",
+            "save-task-feedback",
             "--session",
             str(self.session_dir),
             "--phase",
@@ -453,7 +477,7 @@ class SessionCliTest(unittest.TestCase):
             "coach note",
         )
         self.run_cli(
-            "reveal-exec-feedback",
+            "reveal-task-feedback",
             "--session",
             str(self.session_dir),
             "--phase",
@@ -499,7 +523,7 @@ class SessionCliTest(unittest.TestCase):
             "4",
         )
         self.run_cli(
-            "start-exec-task",
+            "start-task",
             "--session",
             str(self.session_dir),
             "--phase",
@@ -514,7 +538,7 @@ class SessionCliTest(unittest.TestCase):
             "Preserve the failing case as a regression asset.",
         )
         self.run_cli(
-            "submit-exec-artifact",
+            "submit-artifact",
             "--session",
             str(self.session_dir),
             "--phase",
@@ -525,7 +549,7 @@ class SessionCliTest(unittest.TestCase):
             "patch",
         )
         self.run_cli(
-            "run-exec-check",
+            "run-check",
             "--session",
             str(self.session_dir),
             "--phase",
@@ -534,7 +558,7 @@ class SessionCliTest(unittest.TestCase):
             "r01",
         )
         self.run_cli(
-            "save-exec-feedback",
+            "save-task-feedback",
             "--session",
             str(self.session_dir),
             "--phase",
@@ -545,7 +569,7 @@ class SessionCliTest(unittest.TestCase):
             "coach note",
         )
         self.run_cli(
-            "reveal-exec-feedback",
+            "reveal-task-feedback",
             "--session",
             str(self.session_dir),
             "--phase",
@@ -596,7 +620,15 @@ class SessionCliTest(unittest.TestCase):
             "3",
         )
         result = self.run_cli("next", "--session", str(self.session_dir))
-        self.assertIn("start-exec-task", result.stdout)
+        self.assertIn("start-task", result.stdout)
+        self.assertIn("--phase 3", result.stdout)
+
+    def test_cli_help_hides_phase_specific_aliases(self):
+        result = self.run_cli("--help")
+        self.assertIn("start-task", result.stdout)
+        self.assertIn("submit-artifact", result.stdout)
+        self.assertNotIn("start-exec-task", result.stdout)
+        self.assertNotIn("run-exec-check", result.stdout)
 
     def test_executable_resubmit_clears_previous_runtime_feedback(self):
         self.advance_executable_to_phase_2()
@@ -604,6 +636,8 @@ class SessionCliTest(unittest.TestCase):
             "start-task",
             "--session",
             str(self.session_dir),
+            "--phase",
+            "2",
             "--id",
             "t01",
             "--title",
@@ -617,16 +651,20 @@ class SessionCliTest(unittest.TestCase):
             "submit-artifact",
             "--session",
             str(self.session_dir),
+            "--phase",
+            "2",
             "--id",
             "t01",
             "--text",
             "patch v1",
         )
-        self.run_cli("run-check", "--session", str(self.session_dir), "--id", "t01")
+        self.run_cli("run-check", "--session", str(self.session_dir), "--phase", "2", "--id", "t01")
         self.run_cli(
             "submit-artifact",
             "--session",
             str(self.session_dir),
+            "--phase",
+            "2",
             "--id",
             "t01",
             "--text",
@@ -638,6 +676,8 @@ class SessionCliTest(unittest.TestCase):
             "save-task-feedback",
             "--session",
             str(self.session_dir),
+            "--phase",
+            "2",
             "--id",
             "t01",
             "--text",
@@ -961,6 +1001,8 @@ class SessionCliTest(unittest.TestCase):
             "start-task",
             "--session",
             str(self.session_dir),
+            "--phase",
+            "2",
             "--id",
             "t01",
             "--title",
@@ -974,12 +1016,14 @@ class SessionCliTest(unittest.TestCase):
             "submit-artifact",
             "--session",
             str(self.session_dir),
+            "--phase",
+            "2",
             "--id",
             "t01",
             "--text",
             "patch",
         )
-        self.run_cli("run-check", "--session", str(self.session_dir), "--id", "t01")
+        self.run_cli("run-check", "--session", str(self.session_dir), "--phase", "2", "--id", "t01")
         leaked = self.session_dir / "shared" / "runtime-feedback" / "t99" / "round1.md"
         leaked.parent.mkdir(parents=True, exist_ok=True)
         leaked.write_text("leak", encoding="utf-8")

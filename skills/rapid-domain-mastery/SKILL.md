@@ -120,15 +120,18 @@ python3 "$SKILL_DIR/scripts/session.py" request-followup --session .rdm --id q01
 
 ```bash
 python3 "$SKILL_DIR/scripts/session.py" start-task --session .rdm --id t01 \
+  --phase 2 \
   --title "修复失败测试" \
   --check-command "pytest -q" \
   --from-file shared/tasks/t01.md
 python3 "$SKILL_DIR/scripts/session.py" submit-artifact --session .rdm --id t01 \
+  --phase 2 \
   --from-file student/artifacts/t01.diff
-python3 "$SKILL_DIR/scripts/session.py" run-check --session .rdm --id t01
+python3 "$SKILL_DIR/scripts/session.py" run-check --session .rdm --phase 2 --id t01
 python3 "$SKILL_DIR/scripts/session.py" save-task-feedback --session .rdm --id t01 \
+  --phase 2 \
   --from-file coach/feedback/t01.md
-python3 "$SKILL_DIR/scripts/session.py" reveal-task-feedback --session .rdm --id t01
+python3 "$SKILL_DIR/scripts/session.py" reveal-task-feedback --session .rdm --phase 2 --id t01
 ```
 
 这里有两条额外约束：
@@ -143,16 +146,16 @@ python3 "$SKILL_DIR/scripts/session.py" reveal-task-feedback --session .rdm --id
 若 `assessment_mode=executable`，Phase 3 可以把迁移题变成可运行任务：
 
 ```bash
-python3 "$SKILL_DIR/scripts/session.py" start-exec-task --session .rdm --phase 3 --id m01 \
+python3 "$SKILL_DIR/scripts/session.py" start-task --session .rdm --phase 3 --id m01 \
   --title "迁移到陌生约束" \
   --check-command "pytest -q" \
   --from-file shared/migration-tasks/m01.md
-python3 "$SKILL_DIR/scripts/session.py" submit-exec-artifact --session .rdm --phase 3 --id m01 \
+python3 "$SKILL_DIR/scripts/session.py" submit-artifact --session .rdm --phase 3 --id m01 \
   --from-file student/artifacts/phase3.m01.diff
-python3 "$SKILL_DIR/scripts/session.py" run-exec-check --session .rdm --phase 3 --id m01
-python3 "$SKILL_DIR/scripts/session.py" save-exec-feedback --session .rdm --phase 3 --id m01 \
+python3 "$SKILL_DIR/scripts/session.py" run-check --session .rdm --phase 3 --id m01
+python3 "$SKILL_DIR/scripts/session.py" save-task-feedback --session .rdm --phase 3 --id m01 \
   --from-file coach/feedback/phase3/m01.md
-python3 "$SKILL_DIR/scripts/session.py" reveal-exec-feedback --session .rdm --phase 3 --id m01
+python3 "$SKILL_DIR/scripts/session.py" reveal-task-feedback --session .rdm --phase 3 --id m01
 ```
 
 ### Phase 4：个人知识资产固化
@@ -162,16 +165,16 @@ python3 "$SKILL_DIR/scripts/session.py" reveal-exec-feedback --session .rdm --ph
 若 `assessment_mode=executable`，Phase 4 可以把“错题本”升级成可复跑的回归用例册：
 
 ```bash
-python3 "$SKILL_DIR/scripts/session.py" start-exec-task --session .rdm --phase 4 --id r01 \
+python3 "$SKILL_DIR/scripts/session.py" start-task --session .rdm --phase 4 --id r01 \
   --title "保留历史错误为回归用例" \
   --check-command "pytest -q" \
   --from-file shared/regression-cases/r01.md
-python3 "$SKILL_DIR/scripts/session.py" submit-exec-artifact --session .rdm --phase 4 --id r01 \
+python3 "$SKILL_DIR/scripts/session.py" submit-artifact --session .rdm --phase 4 --id r01 \
   --from-file student/artifacts/phase4.r01.diff
-python3 "$SKILL_DIR/scripts/session.py" run-exec-check --session .rdm --phase 4 --id r01
-python3 "$SKILL_DIR/scripts/session.py" save-exec-feedback --session .rdm --phase 4 --id r01 \
+python3 "$SKILL_DIR/scripts/session.py" run-check --session .rdm --phase 4 --id r01
+python3 "$SKILL_DIR/scripts/session.py" save-task-feedback --session .rdm --phase 4 --id r01 \
   --from-file coach/feedback/phase4/r01.md
-python3 "$SKILL_DIR/scripts/session.py" reveal-exec-feedback --session .rdm --phase 4 --id r01
+python3 "$SKILL_DIR/scripts/session.py" reveal-task-feedback --session .rdm --phase 4 --id r01
 ```
 
 ```bash
@@ -193,18 +196,12 @@ python3 "$SKILL_DIR/scripts/session.py" export --session .rdm --output exports/r
 | `save-feedback` | 学生提交后保存教练反馈 |
 | `reveal-feedback` | 读取已解锁的教练反馈 |
 | `request-followup` | 在已 reveal 的反馈后开启下一轮追问 |
-| `start-task` | 创建 executable 模式下的 Phase 2 任务 |
+| `start-task` | 创建 executable 任务；用 `--phase 2/3/4` 区分红灯任务、迁移任务和回归用例 |
 | `submit-artifact` | 提交 executable 模式下的学生产物 |
 | `run-check` | 运行 executable 模式下的即时环境检查 |
 | `save-task-feedback` | 保存 executable 任务的教练反馈 |
 | `reveal-task-feedback` | 读取 executable 任务已解锁的教练反馈 |
 | `request-task-followup` | 为 executable 任务开启下一轮 |
-| `start-exec-task` | 创建 Phase 3/4 的 executable 任务 |
-| `submit-exec-artifact` | 提交 Phase 3/4 的学生产物 |
-| `run-exec-check` | 运行 Phase 3/4 的即时环境检查 |
-| `save-exec-feedback` | 保存 Phase 3/4 的教练反馈 |
-| `reveal-exec-feedback` | 读取 Phase 3/4 已解锁的教练反馈 |
-| `request-exec-followup` | 为 Phase 3/4 任务开启下一轮 |
 | `finish-phase` | 校验并标记阶段完成 |
 | `export` | 导出学生成果和已解锁教练内容 |
 | `check` | 检查会话完整性 |

@@ -1584,7 +1584,7 @@ def next_step(session: Path) -> None:
             if not exec_tasks:
                 print(
                     f"next: create the first executable {task_label} task for phase {current_phase}\n"
-                    f"command: python3 \"$SKILL_DIR/scripts/session.py\" start-exec-task --session .rdm --phase {current_phase} --id {'m01' if current_phase == 3 else 'r01'} --title \"{task_label.title()} task 1\" --check-command \"pytest -q\" --from-file {'shared/migration-tasks/m01.md' if current_phase == 3 else 'shared/regression-cases/r01.md'}"
+                    f"command: python3 \"$SKILL_DIR/scripts/session.py\" start-task --session .rdm --phase {current_phase} --id {'m01' if current_phase == 3 else 'r01'} --title \"{task_label.title()} task 1\" --check-command \"pytest -q\" --from-file {'shared/migration-tasks/m01.md' if current_phase == 3 else 'shared/regression-cases/r01.md'}"
                 )
                 return
             submitted_without_runtime = []
@@ -1598,7 +1598,7 @@ def next_step(session: Path) -> None:
                 tid = sorted(submitted_without_runtime)[0]
                 print(
                     f"next: run the executable check for phase {current_phase} task {tid}\n"
-                    f"command: python3 \"$SKILL_DIR/scripts/session.py\" run-exec-check --session .rdm --phase {current_phase} --id {tid}"
+                    f"command: python3 \"$SKILL_DIR/scripts/session.py\" run-check --session .rdm --phase {current_phase} --id {tid}"
                 )
                 return
             submitted_tasks = [tid for tid, task in exec_tasks.items() if task["status"] == "submitted"]
@@ -1606,7 +1606,7 @@ def next_step(session: Path) -> None:
                 tid = sorted(submitted_tasks)[0]
                 print(
                     f"next: save coach feedback for phase {current_phase} task {tid}\n"
-                    f"command: python3 \"$SKILL_DIR/scripts/session.py\" save-exec-feedback --session .rdm --phase {current_phase} --id {tid} --from-file coach/feedback/phase{current_phase}/{tid}.md"
+                    f"command: python3 \"$SKILL_DIR/scripts/session.py\" save-task-feedback --session .rdm --phase {current_phase} --id {tid} --from-file coach/feedback/phase{current_phase}/{tid}.md"
                 )
                 return
             reviewed_hidden = [tid for tid, task in exec_tasks.items() if task["status"] == "reviewed" and not task.get("revealed")]
@@ -1614,7 +1614,7 @@ def next_step(session: Path) -> None:
                 tid = sorted(reviewed_hidden)[0]
                 print(
                     f"next: reveal coach feedback for phase {current_phase} task {tid}\n"
-                    f"command: python3 \"$SKILL_DIR/scripts/session.py\" reveal-exec-feedback --session .rdm --phase {current_phase} --id {tid}"
+                    f"command: python3 \"$SKILL_DIR/scripts/session.py\" reveal-task-feedback --session .rdm --phase {current_phase} --id {tid}"
                 )
                 return
             reviewed_followup_ready = [
@@ -1627,7 +1627,7 @@ def next_step(session: Path) -> None:
                 next_round = int(exec_tasks[tid]["round"]) + 1
                 print(
                     f"next: open follow-up round {next_round} for phase {current_phase} task {tid} if the coach asked for another iteration\n"
-                    f"command: python3 \"$SKILL_DIR/scripts/session.py\" request-exec-followup --session .rdm --phase {current_phase} --id {tid}"
+                    f"command: python3 \"$SKILL_DIR/scripts/session.py\" request-task-followup --session .rdm --phase {current_phase} --id {tid}"
                 )
                 return
             open_tasks = [tid for tid, task in exec_tasks.items() if task["status"] == "open"]
@@ -1635,7 +1635,7 @@ def next_step(session: Path) -> None:
                 tid = sorted(open_tasks)[0]
                 print(
                     f"next: submit the learner artifact for phase {current_phase} task {tid}\n"
-                    f"command: python3 \"$SKILL_DIR/scripts/session.py\" submit-exec-artifact --session .rdm --phase {current_phase} --id {tid} --from-file student/artifacts/phase{current_phase}.{tid}.diff"
+                    f"command: python3 \"$SKILL_DIR/scripts/session.py\" submit-artifact --session .rdm --phase {current_phase} --id {tid} --from-file student/artifacts/phase{current_phase}.{tid}.diff"
                 )
                 return
         print(
@@ -1649,7 +1649,7 @@ def next_step(session: Path) -> None:
         if not tasks:
             print(
                 "next: create the first executable task\n"
-                "command: python3 \"$SKILL_DIR/scripts/session.py\" start-task --session .rdm --id t01 --title \"Red task 1\" --check-command \"pytest -q\" --from-file shared/tasks/t01.md"
+                "command: python3 \"$SKILL_DIR/scripts/session.py\" start-task --session .rdm --phase 2 --id t01 --title \"Red task 1\" --check-command \"pytest -q\" --from-file shared/tasks/t01.md"
             )
             return
 
@@ -1664,7 +1664,7 @@ def next_step(session: Path) -> None:
             tid = sorted(submitted_without_runtime)[0]
             print(
                 f"next: run the executable check for {tid}\n"
-                f"command: python3 \"$SKILL_DIR/scripts/session.py\" run-check --session .rdm --id {tid}"
+                f"command: python3 \"$SKILL_DIR/scripts/session.py\" run-check --session .rdm --phase 2 --id {tid}"
             )
             return
 
@@ -1673,7 +1673,7 @@ def next_step(session: Path) -> None:
             tid = sorted(submitted)[0]
             print(
                 f"next: save coach feedback for executable task {tid}\n"
-                f"command: python3 \"$SKILL_DIR/scripts/session.py\" save-task-feedback --session .rdm --id {tid} --from-file coach/feedback/{tid}.md"
+                f"command: python3 \"$SKILL_DIR/scripts/session.py\" save-task-feedback --session .rdm --phase 2 --id {tid} --from-file coach/feedback/{tid}.md"
             )
             return
 
@@ -1682,7 +1682,7 @@ def next_step(session: Path) -> None:
             tid = sorted(reviewed_hidden)[0]
             print(
                 f"next: reveal coach feedback for executable task {tid}\n"
-                f"command: python3 \"$SKILL_DIR/scripts/session.py\" reveal-task-feedback --session .rdm --id {tid}"
+                f"command: python3 \"$SKILL_DIR/scripts/session.py\" reveal-task-feedback --session .rdm --phase 2 --id {tid}"
             )
             return
 
@@ -1696,7 +1696,7 @@ def next_step(session: Path) -> None:
             next_round = int(tasks[tid]["round"]) + 1
             print(
                 f"next: open follow-up round {next_round} for executable task {tid} if the coach asked for another patch\n"
-                f"command: python3 \"$SKILL_DIR/scripts/session.py\" request-task-followup --session .rdm --id {tid}"
+                f"command: python3 \"$SKILL_DIR/scripts/session.py\" request-task-followup --session .rdm --phase 2 --id {tid}"
             )
             return
 
@@ -1705,7 +1705,7 @@ def next_step(session: Path) -> None:
             tid = sorted(open_tasks)[0]
             print(
                 f"next: submit the learner artifact for {tid}\n"
-                f"command: python3 \"$SKILL_DIR/scripts/session.py\" submit-artifact --session .rdm --id {tid} --from-file student/artifacts/{tid}.diff"
+                f"command: python3 \"$SKILL_DIR/scripts/session.py\" submit-artifact --session .rdm --phase 2 --id {tid} --from-file student/artifacts/{tid}.diff"
             )
             return
 
@@ -1967,8 +1967,9 @@ def build_parser() -> argparse.ArgumentParser:
     _add_session_arg(request_followup_cmd)
     request_followup_cmd.add_argument("--id", dest="question_id", required=True)
 
-    start_task_cmd = sub.add_parser("start-task", help="create a phase-2 executable task")
+    start_task_cmd = sub.add_parser("start-task", help="create an executable task for phase 2, 3, or 4")
     _add_session_arg(start_task_cmd)
+    start_task_cmd.add_argument("--phase", type=int, default=QUESTION_PHASE)
     start_task_cmd.add_argument("--id", dest="task_id", required=True)
     start_task_cmd.add_argument("--title", default="")
     start_task_cmd.add_argument("--check-command", required=True, help="shell command to validate the task")
@@ -1976,11 +1977,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     submit_artifact_cmd = sub.add_parser("submit-artifact", help="submit a learner artifact for an executable task")
     _add_session_arg(submit_artifact_cmd)
+    submit_artifact_cmd.add_argument("--phase", type=int, default=QUESTION_PHASE)
     submit_artifact_cmd.add_argument("--id", dest="task_id", required=True)
     _add_text_or_file(submit_artifact_cmd, "artifact")
 
     run_check_cmd = sub.add_parser("run-check", help="run the configured check command for an executable task")
     _add_session_arg(run_check_cmd)
+    run_check_cmd.add_argument("--phase", type=int, default=QUESTION_PHASE)
     run_check_cmd.add_argument("--id", dest="task_id", required=True)
     run_check_cmd.add_argument(
         "--command",
@@ -1990,56 +1993,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     save_task_feedback_cmd = sub.add_parser("save-task-feedback", help="save coach feedback for an executable task")
     _add_session_arg(save_task_feedback_cmd)
+    save_task_feedback_cmd.add_argument("--phase", type=int, default=QUESTION_PHASE)
     save_task_feedback_cmd.add_argument("--id", dest="task_id", required=True)
     _add_text_or_file(save_task_feedback_cmd, "feedback")
 
     reveal_task_feedback_cmd = sub.add_parser("reveal-task-feedback", help="reveal coach feedback for an executable task")
     _add_session_arg(reveal_task_feedback_cmd)
+    reveal_task_feedback_cmd.add_argument("--phase", type=int, default=QUESTION_PHASE)
     reveal_task_feedback_cmd.add_argument("--id", dest="task_id", required=True)
 
     request_task_followup_cmd = sub.add_parser("request-task-followup", help="open a new follow-up round for an executable task")
     _add_session_arg(request_task_followup_cmd)
+    request_task_followup_cmd.add_argument("--phase", type=int, default=QUESTION_PHASE)
     request_task_followup_cmd.add_argument("--id", dest="task_id", required=True)
-
-    start_exec_task_cmd = sub.add_parser("start-exec-task", help="create an executable task for phase 3 or 4")
-    _add_session_arg(start_exec_task_cmd)
-    start_exec_task_cmd.add_argument("--phase", type=int, required=True)
-    start_exec_task_cmd.add_argument("--id", dest="task_id", required=True)
-    start_exec_task_cmd.add_argument("--title", default="")
-    start_exec_task_cmd.add_argument("--check-command", required=True, help="shell command to validate the task")
-    _add_text_or_file(start_exec_task_cmd, "task")
-
-    submit_exec_artifact_cmd = sub.add_parser("submit-exec-artifact", help="submit an executable artifact for phase 3 or 4")
-    _add_session_arg(submit_exec_artifact_cmd)
-    submit_exec_artifact_cmd.add_argument("--phase", type=int, required=True)
-    submit_exec_artifact_cmd.add_argument("--id", dest="task_id", required=True)
-    _add_text_or_file(submit_exec_artifact_cmd, "artifact")
-
-    run_exec_check_cmd = sub.add_parser("run-exec-check", help="run the configured check for a phase 3 or 4 executable task")
-    _add_session_arg(run_exec_check_cmd)
-    run_exec_check_cmd.add_argument("--phase", type=int, required=True)
-    run_exec_check_cmd.add_argument("--id", dest="task_id", required=True)
-    run_exec_check_cmd.add_argument(
-        "--command",
-        dest="exec_check_command_override",
-        help="optional override for the executable task check command",
-    )
-
-    save_exec_feedback_cmd = sub.add_parser("save-exec-feedback", help="save coach feedback for a phase 3 or 4 executable task")
-    _add_session_arg(save_exec_feedback_cmd)
-    save_exec_feedback_cmd.add_argument("--phase", type=int, required=True)
-    save_exec_feedback_cmd.add_argument("--id", dest="task_id", required=True)
-    _add_text_or_file(save_exec_feedback_cmd, "feedback")
-
-    reveal_exec_feedback_cmd = sub.add_parser("reveal-exec-feedback", help="reveal coach feedback for a phase 3 or 4 executable task")
-    _add_session_arg(reveal_exec_feedback_cmd)
-    reveal_exec_feedback_cmd.add_argument("--phase", type=int, required=True)
-    reveal_exec_feedback_cmd.add_argument("--id", dest="task_id", required=True)
-
-    request_exec_followup_cmd = sub.add_parser("request-exec-followup", help="open a new follow-up round for a phase 3 or 4 executable task")
-    _add_session_arg(request_exec_followup_cmd)
-    request_exec_followup_cmd.add_argument("--phase", type=int, required=True)
-    request_exec_followup_cmd.add_argument("--id", dest="task_id", required=True)
 
     finish = sub.add_parser("finish-phase", help="mark a phase complete")
     _add_session_arg(finish)
@@ -2052,7 +2018,25 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _translate_legacy_exec_aliases(argv: list[str]) -> list[str]:
+    if not argv:
+        return argv
+    legacy_aliases = {
+        "start-exec-task": "start-task",
+        "submit-exec-artifact": "submit-artifact",
+        "run-exec-check": "run-check",
+        "save-exec-feedback": "save-task-feedback",
+        "reveal-exec-feedback": "reveal-task-feedback",
+        "request-exec-followup": "request-task-followup",
+    }
+    translated = list(argv)
+    translated[0] = legacy_aliases.get(translated[0], translated[0])
+    return translated
+
+
 def main(argv: Optional[list[str]] = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    argv = _translate_legacy_exec_aliases(argv)
     parser = build_parser()
     args = parser.parse_args(argv)
     command = args.command
@@ -2084,20 +2068,37 @@ def main(argv: Optional[list[str]] = None) -> int:
         elif command == "start-question":
             start_question(Path(args.session), args.question_id, args.title, args.text, args.source)
         elif command == "start-task":
-            start_task(
-                Path(args.session),
-                args.task_id,
-                args.title,
-                args.check_command,
-                args.text,
-                args.source,
-            )
+            if args.phase == QUESTION_PHASE:
+                start_task(
+                    Path(args.session),
+                    args.task_id,
+                    args.title,
+                    args.check_command,
+                    args.text,
+                    args.source,
+                )
+            else:
+                start_exec_task(
+                    Path(args.session),
+                    args.phase,
+                    args.task_id,
+                    args.title,
+                    args.check_command,
+                    args.text,
+                    args.source,
+                )
         elif command == "submit":
             submit_answer(Path(args.session), args.question_id, args.text, args.source)
         elif command == "submit-artifact":
-            submit_artifact(Path(args.session), args.task_id, args.text, args.source)
+            if args.phase == QUESTION_PHASE:
+                submit_artifact(Path(args.session), args.task_id, args.text, args.source)
+            else:
+                submit_exec_artifact(Path(args.session), args.phase, args.task_id, args.text, args.source)
         elif command == "run-check":
-            run_check(Path(args.session), args.task_id, args.check_command_override)
+            if args.phase == QUESTION_PHASE:
+                run_check(Path(args.session), args.task_id, args.check_command_override)
+            else:
+                run_exec_check(Path(args.session), args.phase, args.task_id, args.check_command_override)
         elif command == "save-feedback":
             save_feedback(Path(args.session), args.question_id, args.text, args.source)
         elif command == "reveal-feedback":
@@ -2105,31 +2106,20 @@ def main(argv: Optional[list[str]] = None) -> int:
         elif command == "request-followup":
             request_followup(Path(args.session), args.question_id)
         elif command == "save-task-feedback":
-            save_task_feedback(Path(args.session), args.task_id, args.text, args.source)
+            if args.phase == QUESTION_PHASE:
+                save_task_feedback(Path(args.session), args.task_id, args.text, args.source)
+            else:
+                save_exec_feedback(Path(args.session), args.phase, args.task_id, args.text, args.source)
         elif command == "reveal-task-feedback":
-            reveal_task_feedback(Path(args.session), args.task_id)
+            if args.phase == QUESTION_PHASE:
+                reveal_task_feedback(Path(args.session), args.task_id)
+            else:
+                reveal_exec_feedback(Path(args.session), args.phase, args.task_id)
         elif command == "request-task-followup":
-            request_task_followup(Path(args.session), args.task_id)
-        elif command == "start-exec-task":
-            start_exec_task(
-                Path(args.session),
-                args.phase,
-                args.task_id,
-                args.title,
-                args.check_command,
-                args.text,
-                args.source,
-            )
-        elif command == "submit-exec-artifact":
-            submit_exec_artifact(Path(args.session), args.phase, args.task_id, args.text, args.source)
-        elif command == "run-exec-check":
-            run_exec_check(Path(args.session), args.phase, args.task_id, args.exec_check_command_override)
-        elif command == "save-exec-feedback":
-            save_exec_feedback(Path(args.session), args.phase, args.task_id, args.text, args.source)
-        elif command == "reveal-exec-feedback":
-            reveal_exec_feedback(Path(args.session), args.phase, args.task_id)
-        elif command == "request-exec-followup":
-            request_exec_followup(Path(args.session), args.phase, args.task_id)
+            if args.phase == QUESTION_PHASE:
+                request_task_followup(Path(args.session), args.task_id)
+            else:
+                request_exec_followup(Path(args.session), args.phase, args.task_id)
         elif command == "finish-phase":
             finish_phase(Path(args.session), args.phase)
         elif command == "export":
