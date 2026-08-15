@@ -47,3 +47,17 @@
 
 - `assessment_mode=executable` 时，Phase 2 优先用任务和运行检查，而不是区分题。
 - 即使在 executable 模式下，也保留 RDM 的学生先产出、教练后 reveal 的学习顺序。
+
+## 当前最小命令面
+
+- `start-task`
+- `submit-artifact`
+- `run-check`
+- `save-task-feedback`
+- `reveal-task-feedback`
+- `request-task-followup`
+
+其中：
+
+- `run-check` 产出的 runtime feedback 立即写到 `shared/runtime-feedback/`
+- 教练反馈仍先写到 `state/locked/`，只有 reveal 后才进入 `coach/`

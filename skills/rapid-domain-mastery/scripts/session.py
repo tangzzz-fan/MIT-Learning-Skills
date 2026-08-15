@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import subprocess
 import shutil
 import sys
 from datetime import datetime, timezone
@@ -111,6 +112,19 @@ def _question_revealed_feedback_path(session: Path, question_id: str, round_no: 
     return session / "coach" / "feedback" / question_id / f"round{round_no}.md"
 
 
+def _task_round_artifact_path(
+    session: Path, task_id: str, round_no: int, source: Optional[Path] = None
+) -> Path:
+    suffix = ".txt"
+    if source is not None and "".join(source.suffixes):
+        suffix = "".join(source.suffixes)
+    return session / "student" / "artifacts" / f"{task_id}.round{round_no}{suffix}"
+
+
+def _task_runtime_feedback_path(session: Path, task_id: str, round_no: int) -> Path:
+    return session / "shared" / "runtime-feedback" / task_id / f"round{round_no}.md"
+
+
 def _write_or_copy(
     dest: Path,
     *,
@@ -167,6 +181,7 @@ def _new_state(
             },
         },
         "2": {"status": "pending", "questions": {}},
+        
         "3": {
             "status": "pending",
             "barrier": {
@@ -330,6 +345,8 @@ def _migrate_state(state: Dict[str, Any]) -> Dict[str, Any]:
         question.setdefault("rounds", [])
         question.setdefault("revealed", False)
 
+    _phase_state(state, QUESTION_PHASE).setdefault("tasks", {})
+
     return state
 
 
@@ -350,6 +367,20 @@ def save_state(session: Path, state: Dict[str, Any]) -> None:
 
 def _phase_state(state: Dict[str, Any], phase: int) -> Dict[str, Any]:
     return state["phases"][str(phase)]
+
+
+def _phase2_questions(state: Dict[str, Any]) -> Dict[str, Any]:
+    return _phase_state(state, QUESTION_PHASE).setdefault("questions", {})
+
+
+def _phase2_tasks(state: Dict[str, Any]) -> Dict[str, Any]:
+    return _phase_state(state, QUESTION_PHASE).setdefault("tasks", {})
+
+
+def _require_assessment_mode(state: Dict[str, Any], expected: str, action: str) -> None:
+    actual = state.get("assessment_mode", "conceptual")
+    if actual != expected:
+        raise SessionError(f"{action} requires assessment_mode={expected}; current mode is {actual}")
 
 
 def _check_phase(phase: int) -> None:
@@ -445,8 +476,9 @@ def start_question(
 ) -> None:
     _valid_id(question_id)
     state = load_state(session)
+    _require_assessment_mode(state, "conceptual", "start-question")
     _require_current_phase(state, QUESTION_PHASE, "start-question")
-    questions = _phase_state(state, QUESTION_PHASE)["questions"]
+    questions = _phase2_questions(state)
     if question_id in questions:
         raise SessionError(f"question already exists: {question_id}")
 
@@ -468,11 +500,55 @@ def start_question(
     print(f"started question: {question_id}")
 
 
+def start_task(
+    session: Path,
+    task_id: str,
+    title: str,
+    check_command: str,
+    text: Optional[str],
+    source: Optional[Path],
+) -> None:
+    _valid_id(task_id)
+    state = load_state(session)
+    _require_assessment_mode(state, "executable", "start-task")
+    _require_current_phase(state, QUESTION_PHASE, "start-task")
+    tasks = _phase2_tasks(state)
+    if task_id in tasks:
+        raise SessionError(f"task already exists: {task_id}")
+    if not check_command.strip():
+        raise SessionError("check command must not be empty")
+
+    dest = session / "shared" / "tasks" / f"{task_id}.md"
+    _write_or_copy(dest, text=text, source=source, label="task")
+    tasks[task_id] = {
+        "id": task_id,
+        "phase": QUESTION_PHASE,
+        "title": title.strip(),
+        "task_file": str(dest.relative_to(session)),
+        "check_command": check_command.strip(),
+        "status": "open",
+        "round": 1,
+        "completed_round": 0,
+        "rounds": [],
+        "revealed": False,
+    }
+    _phase_state(state, QUESTION_PHASE)["status"] = "in_progress"
+    save_state(session, state)
+    print(f"started task: {task_id}")
+
+
 def _question(state: Dict[str, Any], question_id: str) -> Dict[str, Any]:
-    questions = _phase_state(state, QUESTION_PHASE)["questions"]
+    questions = _phase2_questions(state)
     if question_id not in questions:
         raise SessionError(f"unknown question: {question_id}")
     return questions[question_id]
+
+
+def _task(state: Dict[str, Any], task_id: str) -> Dict[str, Any]:
+    tasks = _phase2_tasks(state)
+    if task_id not in tasks:
+        raise SessionError(f"unknown task: {task_id}")
+    return tasks[task_id]
 
 
 def submit_answer(
@@ -482,6 +558,7 @@ def submit_answer(
     source: Optional[Path],
 ) -> None:
     state = load_state(session)
+    _require_assessment_mode(state, "conceptual", "submit")
     _require_current_phase(state, QUESTION_PHASE, "submit")
     question = _question(state, question_id)
     if question["status"] != "open":
@@ -511,6 +588,106 @@ def submit_answer(
     print(f"submitted answer for question: {question_id} round {round_no}")
 
 
+def submit_artifact(
+    session: Path,
+    task_id: str,
+    text: Optional[str],
+    source: Optional[Path],
+) -> None:
+    state = load_state(session)
+    _require_assessment_mode(state, "executable", "submit-artifact")
+    _require_current_phase(state, QUESTION_PHASE, "submit-artifact")
+    task = _task(state, task_id)
+    if task["status"] not in {"open", "submitted"}:
+        raise SessionError(f"task {task_id} is {task['status']}; cannot submit a new artifact now")
+
+    round_no = int(task["round"])
+    dest = _task_round_artifact_path(session, task_id, round_no, source)
+    _write_or_copy(dest, text=text, source=source, label="artifact")
+    task["status"] = "submitted"
+    rounds = task["rounds"]
+    round_entry = None
+    for existing in rounds:
+        if existing["round"] == round_no:
+            round_entry = existing
+            break
+    if round_entry is None:
+        round_entry = {"round": round_no}
+        rounds.append(round_entry)
+    round_entry["artifact_file"] = str(dest.relative_to(session))
+    round_entry["submitted_at"] = utcnow()
+    round_entry.setdefault("runtime_feedback_file", None)
+    round_entry.setdefault("runtime_exit_code", None)
+    round_entry.setdefault("runtime_ran_at", None)
+    round_entry.setdefault("locked_feedback_file", None)
+    round_entry.setdefault("revealed_feedback_file", None)
+    round_entry["revealed"] = False
+    save_state(session, state)
+    print(f"submitted artifact for task: {task_id} round {round_no}")
+
+
+def run_check(session: Path, task_id: str, command: Optional[str]) -> None:
+    state = load_state(session)
+    _require_assessment_mode(state, "executable", "run-check")
+    _require_current_phase(state, QUESTION_PHASE, "run-check")
+    task = _task(state, task_id)
+    if task["status"] != "submitted":
+        raise SessionError(f"task {task_id} is {task['status']}; submit an artifact before running checks")
+
+    workspace_root = state.get("workspace_root", "").strip()
+    if not workspace_root:
+        raise SessionError("run-check requires workspace_root; re-init or migrate the session with --workspace-root")
+
+    round_no = int(task["round"])
+    round_entry = None
+    for existing in task["rounds"]:
+        if existing["round"] == round_no:
+            round_entry = existing
+            break
+    if round_entry is None or not round_entry.get("artifact_file"):
+        raise SessionError(f"task {task_id} round {round_no} has no recorded artifact")
+
+    check_command = (command or task.get("check_command", "")).strip()
+    if not check_command:
+        raise SessionError(f"task {task_id} has no check command")
+
+    result = subprocess.run(
+        check_command,
+        shell=True,
+        cwd=workspace_root,
+        text=True,
+        capture_output=True,
+    )
+    feedback_path = _task_runtime_feedback_path(session, task_id, round_no)
+    body = "\n".join(
+        [
+            f"# Runtime Feedback: {task_id} round {round_no}",
+            "",
+            f"- command: `{check_command}`",
+            f"- exit_code: `{result.returncode}`",
+            f"- ran_at: `{utcnow()}`",
+            "",
+            "## stdout",
+            "```text",
+            result.stdout.rstrip(),
+            "```",
+            "",
+            "## stderr",
+            "```text",
+            result.stderr.rstrip(),
+            "```",
+            "",
+        ]
+    )
+    feedback_path.parent.mkdir(parents=True, exist_ok=True)
+    feedback_path.write_text(body, encoding="utf-8")
+    round_entry["runtime_feedback_file"] = str(feedback_path.relative_to(session))
+    round_entry["runtime_exit_code"] = result.returncode
+    round_entry["runtime_ran_at"] = utcnow()
+    save_state(session, state)
+    print(body, end="")
+
+
 def save_feedback(
     session: Path,
     question_id: str,
@@ -518,6 +695,7 @@ def save_feedback(
     source: Optional[Path],
 ) -> None:
     state = load_state(session)
+    _require_assessment_mode(state, "conceptual", "save-feedback")
     _require_current_phase(state, QUESTION_PHASE, "save-feedback")
     question = _question(state, question_id)
     if question["status"] != "submitted":
@@ -549,6 +727,7 @@ def save_feedback(
 
 def reveal_feedback(session: Path, question_id: str) -> None:
     state = load_state(session)
+    _require_assessment_mode(state, "conceptual", "reveal-feedback")
     _require_current_phase(state, QUESTION_PHASE, "reveal-feedback")
     question = _question(state, question_id)
     if question["status"] != "reviewed":
@@ -578,6 +757,7 @@ def reveal_feedback(session: Path, question_id: str) -> None:
 
 def request_followup(session: Path, question_id: str) -> None:
     state = load_state(session)
+    _require_assessment_mode(state, "conceptual", "request-followup")
     _require_current_phase(state, QUESTION_PHASE, "request-followup")
     question = _question(state, question_id)
     if question["status"] != "reviewed":
@@ -601,6 +781,98 @@ def request_followup(session: Path, question_id: str) -> None:
     print(f"opened follow-up round {question['round']} for question: {question_id}")
 
 
+def save_task_feedback(
+    session: Path,
+    task_id: str,
+    text: Optional[str],
+    source: Optional[Path],
+) -> None:
+    state = load_state(session)
+    _require_assessment_mode(state, "executable", "save-task-feedback")
+    _require_current_phase(state, QUESTION_PHASE, "save-task-feedback")
+    task = _task(state, task_id)
+    if task["status"] != "submitted":
+        raise SessionError(
+            f"task {task_id} is {task['status']}; submit an artifact before saving coach feedback"
+        )
+
+    round_no = int(task["round"])
+    round_entry = None
+    for existing in task["rounds"]:
+        if existing["round"] == round_no:
+            round_entry = existing
+            break
+    if round_entry is None or not round_entry.get("artifact_file"):
+        raise SessionError(f"task {task_id} round {round_no} has no recorded artifact")
+
+    dest = _question_locked_feedback_path(session, task_id, round_no)
+    _write_or_copy(dest, text=text, source=source, label="feedback")
+    task["status"] = "reviewed"
+    reviewed_at = utcnow()
+    round_entry["locked_feedback_file"] = str(dest.relative_to(session))
+    round_entry["revealed_feedback_file"] = None
+    round_entry["reviewed_at"] = reviewed_at
+    round_entry["revealed"] = False
+    task["revealed"] = False
+    save_state(session, state)
+    print(f"saved locked task feedback for: {task_id} round {round_no}")
+
+
+def reveal_task_feedback(session: Path, task_id: str) -> None:
+    state = load_state(session)
+    _require_assessment_mode(state, "executable", "reveal-task-feedback")
+    _require_current_phase(state, QUESTION_PHASE, "reveal-task-feedback")
+    task = _task(state, task_id)
+    if task["status"] != "reviewed":
+        raise SessionError(f"task {task_id} is {task['status']}; coach feedback is not available yet")
+
+    round_no = int(task["round"])
+    round_entry = None
+    for existing in task["rounds"]:
+        if existing["round"] == round_no:
+            round_entry = existing
+            break
+    if round_entry is None or not round_entry.get("locked_feedback_file"):
+        raise SessionError(f"task {task_id} round {round_no} has no locked feedback")
+
+    locked_feedback_file = session / round_entry["locked_feedback_file"]
+    _require_nonempty_text(locked_feedback_file, "feedback")
+    revealed_feedback_file = _question_revealed_feedback_path(session, task_id, round_no)
+    _copy_if_needed(locked_feedback_file, revealed_feedback_file)
+    round_entry["revealed_feedback_file"] = str(revealed_feedback_file.relative_to(session))
+    round_entry["revealed"] = True
+    task["revealed"] = True
+    task["completed_round"] = max(int(task.get("completed_round", 0)), round_no)
+    save_state(session, state)
+    print(revealed_feedback_file.read_text(encoding="utf-8"), end="")
+
+
+def request_task_followup(session: Path, task_id: str) -> None:
+    state = load_state(session)
+    _require_assessment_mode(state, "executable", "request-task-followup")
+    _require_current_phase(state, QUESTION_PHASE, "request-task-followup")
+    task = _task(state, task_id)
+    if task["status"] != "reviewed":
+        raise SessionError(
+            f"task {task_id} is {task['status']}; reveal the current feedback before opening a follow-up round"
+        )
+    current_round = int(task["round"])
+    round_entry = None
+    for existing in task["rounds"]:
+        if existing["round"] == current_round:
+            round_entry = existing
+            break
+    if round_entry is None or not round_entry.get("revealed"):
+        raise SessionError(
+            f"task {task_id} round {current_round} feedback must be revealed before opening a follow-up round"
+        )
+    task["round"] = current_round + 1
+    task["status"] = "open"
+    task["revealed"] = False
+    save_state(session, state)
+    print(f"opened follow-up round {task['round']} for task: {task_id}")
+
+
 def finish_phase(session: Path, phase: int) -> None:
     _check_phase(phase)
     state = load_state(session)
@@ -613,23 +885,42 @@ def finish_phase(session: Path, phase: int) -> None:
                 f"phase {phase} is not complete; reveal the reviewed coach artifact first"
             )
     elif phase == QUESTION_PHASE:
-        questions = phase_data["questions"]
-        if len(questions) < 10:
-            raise SessionError("phase 2 requires at least 10 questions before completion")
-        for question in questions.values():
-            if int(question.get("round", 1)) != int(question.get("completed_round", 0)):
-                raise SessionError(
-                    f"question {question['id']} has an open follow-up round; close it before finishing phase 2"
-                )
-        for question in questions.values():
-            if question["status"] != "reviewed":
-                raise SessionError(
-                    f"question {question['id']} is {question['status']}; all questions must be reviewed"
-                )
-            if not question.get("revealed"):
-                raise SessionError(
-                    f"question {question['id']} feedback has not been revealed yet"
-                )
+        if state.get("assessment_mode", "conceptual") == "executable":
+            tasks = _phase2_tasks(state)
+            if not tasks:
+                raise SessionError("phase 2 requires at least 1 executable task before completion")
+            for task in tasks.values():
+                if int(task.get("round", 1)) != int(task.get("completed_round", 0)):
+                    raise SessionError(
+                        f"task {task['id']} has an open follow-up round; close it before finishing phase 2"
+                    )
+            for task in tasks.values():
+                if task["status"] != "reviewed":
+                    raise SessionError(
+                        f"task {task['id']} is {task['status']}; all tasks must be reviewed"
+                    )
+                if not task.get("revealed"):
+                    raise SessionError(
+                        f"task {task['id']} feedback has not been revealed yet"
+                    )
+        else:
+            questions = _phase2_questions(state)
+            if len(questions) < 10:
+                raise SessionError("phase 2 requires at least 10 questions before completion")
+            for question in questions.values():
+                if int(question.get("round", 1)) != int(question.get("completed_round", 0)):
+                    raise SessionError(
+                        f"question {question['id']} has an open follow-up round; close it before finishing phase 2"
+                    )
+            for question in questions.values():
+                if question["status"] != "reviewed":
+                    raise SessionError(
+                        f"question {question['id']} is {question['status']}; all questions must be reviewed"
+                    )
+                if not question.get("revealed"):
+                    raise SessionError(
+                        f"question {question['id']} feedback has not been revealed yet"
+                    )
 
     phase_data["status"] = "completed"
     if phase < 4:
@@ -668,8 +959,19 @@ def export_session(session: Path, output: Path) -> None:
                 coach_dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(coach_src, coach_dst)
         elif phase == str(QUESTION_PHASE):
-            for question in phase_data["questions"].values():
+            for question in _phase2_questions(state).values():
                 for round_entry in question.get("rounds", []):
+                    if round_entry.get("revealed") and round_entry.get("revealed_feedback_file"):
+                        feedback_src = session / round_entry["revealed_feedback_file"]
+                        _require_nonempty_text(feedback_src, "feedback")
+                        feedback_dst = output / round_entry["revealed_feedback_file"]
+                        feedback_dst.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copyfile(feedback_src, feedback_dst)
+            for task in _phase2_tasks(state).values():
+                for round_entry in task.get("rounds", []):
+                    if round_entry.get("artifact_file"):
+                        artifact_src = session / round_entry["artifact_file"]
+                        _require_nonempty_text(artifact_src, "artifact")
                     if round_entry.get("revealed") and round_entry.get("revealed_feedback_file"):
                         feedback_src = session / round_entry["revealed_feedback_file"]
                         _require_nonempty_text(feedback_src, "feedback")
@@ -716,7 +1018,7 @@ def check_session(session: Path) -> None:
             if revealed_file and not (session / revealed_file).exists():
                 errors.append(f"phase {phase} revealed coach artifact is missing on disk")
         elif phase == QUESTION_PHASE:
-            for question in phase_data["questions"].values():
+            for question in _phase2_questions(state).values():
                 for round_entry in question.get("rounds", []):
                     answer_file = round_entry.get("answer_file")
                     locked_feedback_file = round_entry.get("locked_feedback_file")
@@ -735,6 +1037,28 @@ def check_session(session: Path) -> None:
                     errors.append(f"question {question['id']} is reviewed without an answer")
                 if question.get("revealed") and question["status"] != "reviewed":
                     errors.append(f"question {question['id']} is revealed without reviewed feedback")
+            for task in _phase2_tasks(state).values():
+                for round_entry in task.get("rounds", []):
+                    artifact_file = round_entry.get("artifact_file")
+                    runtime_feedback_file = round_entry.get("runtime_feedback_file")
+                    locked_feedback_file = round_entry.get("locked_feedback_file")
+                    revealed_feedback_file = round_entry.get("revealed_feedback_file")
+                    if runtime_feedback_file and not artifact_file:
+                        errors.append(f"task {task['id']} round {round_entry['round']} has runtime feedback without an artifact")
+                    if artifact_file and not (session / artifact_file).exists():
+                        errors.append(f"task {task['id']} round {round_entry['round']} artifact is missing on disk")
+                    if runtime_feedback_file and not (session / runtime_feedback_file).exists():
+                        errors.append(f"task {task['id']} round {round_entry['round']} runtime feedback is missing on disk")
+                    if locked_feedback_file and not (session / locked_feedback_file).exists():
+                        errors.append(f"task {task['id']} round {round_entry['round']} locked feedback is missing on disk")
+                    if round_entry.get("revealed") and not revealed_feedback_file:
+                        errors.append(f"task {task['id']} round {round_entry['round']} is revealed without a revealed feedback path")
+                    if revealed_feedback_file and not (session / revealed_feedback_file).exists():
+                        errors.append(f"task {task['id']} round {round_entry['round']} revealed feedback is missing on disk")
+                if task["status"] == "reviewed" and not task.get("rounds"):
+                    errors.append(f"task {task['id']} is reviewed without an artifact")
+                if task.get("revealed") and task["status"] != "reviewed":
+                    errors.append(f"task {task['id']} is revealed without reviewed feedback")
 
     expected_phase_artifacts = {
         phase_data["barrier"]["revealed_file"]
@@ -751,8 +1075,13 @@ def check_session(session: Path) -> None:
 
     expected_feedback = {
         round_entry["revealed_feedback_file"]
-        for question in _phase_state(state, QUESTION_PHASE)["questions"].values()
+        for question in _phase2_questions(state).values()
         for round_entry in question.get("rounds", [])
+        if round_entry.get("revealed_feedback_file")
+    } | {
+        round_entry["revealed_feedback_file"]
+        for task in _phase2_tasks(state).values()
+        for round_entry in task.get("rounds", [])
         if round_entry.get("revealed_feedback_file")
     }
     actual_feedback = {
@@ -777,8 +1106,13 @@ def check_session(session: Path) -> None:
 
     locked_feedback = {
         round_entry["locked_feedback_file"]
-        for question in _phase_state(state, QUESTION_PHASE)["questions"].values()
+        for question in _phase2_questions(state).values()
         for round_entry in question.get("rounds", [])
+        if round_entry.get("locked_feedback_file")
+    } | {
+        round_entry["locked_feedback_file"]
+        for task in _phase2_tasks(state).values()
+        for round_entry in task.get("rounds", [])
         if round_entry.get("locked_feedback_file")
     }
     actual_locked_feedback = {
@@ -826,7 +1160,78 @@ def next_step(session: Path) -> None:
         )
         return
 
-    questions = _phase_state(state, QUESTION_PHASE)["questions"]
+    if state.get("assessment_mode", "conceptual") == "executable":
+        tasks = _phase2_tasks(state)
+        if not tasks:
+            print(
+                "next: create the first executable task\n"
+                "command: python3 \"$SKILL_DIR/scripts/session.py\" start-task --session .rdm --id t01 --title \"Red task 1\" --check-command \"pytest -q\" --from-file shared/tasks/t01.md"
+            )
+            return
+
+        submitted_without_runtime = []
+        for tid, task in tasks.items():
+            if task["status"] == "submitted":
+                current_round = int(task["round"])
+                current_entry = next((r for r in task.get("rounds", []) if r["round"] == current_round), None)
+                if current_entry and not current_entry.get("runtime_feedback_file"):
+                    submitted_without_runtime.append(tid)
+        if submitted_without_runtime:
+            tid = sorted(submitted_without_runtime)[0]
+            print(
+                f"next: run the executable check for {tid}\n"
+                f"command: python3 \"$SKILL_DIR/scripts/session.py\" run-check --session .rdm --id {tid}"
+            )
+            return
+
+        submitted = [tid for tid, t in tasks.items() if t["status"] == "submitted"]
+        if submitted:
+            tid = sorted(submitted)[0]
+            print(
+                f"next: save coach feedback for executable task {tid}\n"
+                f"command: python3 \"$SKILL_DIR/scripts/session.py\" save-task-feedback --session .rdm --id {tid} --from-file coach/feedback/{tid}.md"
+            )
+            return
+
+        reviewed_hidden = [tid for tid, t in tasks.items() if t["status"] == "reviewed" and not t.get("revealed")]
+        if reviewed_hidden:
+            tid = sorted(reviewed_hidden)[0]
+            print(
+                f"next: reveal coach feedback for executable task {tid}\n"
+                f"command: python3 \"$SKILL_DIR/scripts/session.py\" reveal-task-feedback --session .rdm --id {tid}"
+            )
+            return
+
+        reviewed_followup_ready = [
+            tid
+            for tid, t in tasks.items()
+            if t["status"] == "reviewed" and t.get("revealed") and int(t.get("completed_round", 0)) == int(t.get("round", 1))
+        ]
+        if reviewed_followup_ready:
+            tid = sorted(reviewed_followup_ready)[0]
+            next_round = int(tasks[tid]["round"]) + 1
+            print(
+                f"next: open follow-up round {next_round} for executable task {tid} if the coach asked for another patch\n"
+                f"command: python3 \"$SKILL_DIR/scripts/session.py\" request-task-followup --session .rdm --id {tid}"
+            )
+            return
+
+        open_tasks = [tid for tid, t in tasks.items() if t["status"] == "open"]
+        if open_tasks:
+            tid = sorted(open_tasks)[0]
+            print(
+                f"next: submit the learner artifact for {tid}\n"
+                f"command: python3 \"$SKILL_DIR/scripts/session.py\" submit-artifact --session .rdm --id {tid} --from-file student/artifacts/{tid}.diff"
+            )
+            return
+
+        print(
+            "next: finish phase 2\n"
+            "command: python3 \"$SKILL_DIR/scripts/session.py\" finish-phase --session .rdm --phase 2"
+        )
+        return
+
+    questions = _phase2_questions(state)
     if len(questions) < 10:
         next_id = f"q{len(questions) + 1:02d}"
         print(
@@ -897,19 +1302,34 @@ def _status_dict(state: Dict[str, Any]) -> Dict[str, Any]:
     for phase in PHASES:
         phase_data = _phase_state(state, phase)
         if phase == QUESTION_PHASE:
-            questions = phase_data["questions"]
-            summary["phases"][str(phase)] = {
-                "status": phase_data["status"],
-                "question_count": len(questions),
-                "questions": {
-                    qid: {
-                        "status": q["status"],
-                        "round": q.get("round", 1),
-                        "completed_round": q.get("completed_round", 0),
-                    }
-                    for qid, q in questions.items()
-                },
-            }
+            if state.get("assessment_mode", "conceptual") == "executable":
+                tasks = _phase2_tasks(state)
+                summary["phases"][str(phase)] = {
+                    "status": phase_data["status"],
+                    "task_count": len(tasks),
+                    "tasks": {
+                        tid: {
+                            "status": t["status"],
+                            "round": t.get("round", 1),
+                            "completed_round": t.get("completed_round", 0),
+                        }
+                        for tid, t in tasks.items()
+                    },
+                }
+            else:
+                questions = _phase2_questions(state)
+                summary["phases"][str(phase)] = {
+                    "status": phase_data["status"],
+                    "question_count": len(questions),
+                    "questions": {
+                        qid: {
+                            "status": q["status"],
+                            "round": q.get("round", 1),
+                            "completed_round": q.get("completed_round", 0),
+                        }
+                        for qid, q in questions.items()
+                    },
+                }
         else:
             barrier = phase_data["barrier"]
             summary["phases"][str(phase)] = {
@@ -1016,6 +1436,40 @@ def build_parser() -> argparse.ArgumentParser:
     _add_session_arg(request_followup_cmd)
     request_followup_cmd.add_argument("--id", dest="question_id", required=True)
 
+    start_task_cmd = sub.add_parser("start-task", help="create a phase-2 executable task")
+    _add_session_arg(start_task_cmd)
+    start_task_cmd.add_argument("--id", dest="task_id", required=True)
+    start_task_cmd.add_argument("--title", default="")
+    start_task_cmd.add_argument("--check-command", required=True, help="shell command to validate the task")
+    _add_text_or_file(start_task_cmd, "task")
+
+    submit_artifact_cmd = sub.add_parser("submit-artifact", help="submit a learner artifact for an executable task")
+    _add_session_arg(submit_artifact_cmd)
+    submit_artifact_cmd.add_argument("--id", dest="task_id", required=True)
+    _add_text_or_file(submit_artifact_cmd, "artifact")
+
+    run_check_cmd = sub.add_parser("run-check", help="run the configured check command for an executable task")
+    _add_session_arg(run_check_cmd)
+    run_check_cmd.add_argument("--id", dest="task_id", required=True)
+    run_check_cmd.add_argument(
+        "--command",
+        dest="check_command_override",
+        help="optional override for the task check command",
+    )
+
+    save_task_feedback_cmd = sub.add_parser("save-task-feedback", help="save coach feedback for an executable task")
+    _add_session_arg(save_task_feedback_cmd)
+    save_task_feedback_cmd.add_argument("--id", dest="task_id", required=True)
+    _add_text_or_file(save_task_feedback_cmd, "feedback")
+
+    reveal_task_feedback_cmd = sub.add_parser("reveal-task-feedback", help="reveal coach feedback for an executable task")
+    _add_session_arg(reveal_task_feedback_cmd)
+    reveal_task_feedback_cmd.add_argument("--id", dest="task_id", required=True)
+
+    request_task_followup_cmd = sub.add_parser("request-task-followup", help="open a new follow-up round for an executable task")
+    _add_session_arg(request_task_followup_cmd)
+    request_task_followup_cmd.add_argument("--id", dest="task_id", required=True)
+
     finish = sub.add_parser("finish-phase", help="mark a phase complete")
     _add_session_arg(finish)
     finish.add_argument("--phase", type=int, required=True)
@@ -1058,14 +1512,33 @@ def main(argv: Optional[list[str]] = None) -> int:
             reveal_phase(Path(args.session), args.phase)
         elif command == "start-question":
             start_question(Path(args.session), args.question_id, args.title, args.text, args.source)
+        elif command == "start-task":
+            start_task(
+                Path(args.session),
+                args.task_id,
+                args.title,
+                args.check_command,
+                args.text,
+                args.source,
+            )
         elif command == "submit":
             submit_answer(Path(args.session), args.question_id, args.text, args.source)
+        elif command == "submit-artifact":
+            submit_artifact(Path(args.session), args.task_id, args.text, args.source)
+        elif command == "run-check":
+            run_check(Path(args.session), args.task_id, args.check_command_override)
         elif command == "save-feedback":
             save_feedback(Path(args.session), args.question_id, args.text, args.source)
         elif command == "reveal-feedback":
             reveal_feedback(Path(args.session), args.question_id)
         elif command == "request-followup":
             request_followup(Path(args.session), args.question_id)
+        elif command == "save-task-feedback":
+            save_task_feedback(Path(args.session), args.task_id, args.text, args.source)
+        elif command == "reveal-task-feedback":
+            reveal_task_feedback(Path(args.session), args.task_id)
+        elif command == "request-task-followup":
+            request_task_followup(Path(args.session), args.task_id)
         elif command == "finish-phase":
             finish_phase(Path(args.session), args.phase)
         elif command == "export":

@@ -105,6 +105,41 @@ class SessionCliTest(unittest.TestCase):
             "1",
         )
 
+    def advance_executable_to_phase_2(self):
+        self.init_executable_session()
+        self.run_cli(
+            "record-attempt",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "1",
+            "--text",
+            "my framework",
+        )
+        self.run_cli(
+            "save-phase-artifact",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "1",
+            "--text",
+            "coach skeleton",
+        )
+        self.run_cli(
+            "reveal-phase",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "1",
+        )
+        self.run_cli(
+            "finish-phase",
+            "--session",
+            str(self.session_dir),
+            "--phase",
+            "1",
+        )
+
     def test_init_personas_default_to_empty_and_are_reported(self):
         self.init_session()
         state = session.load_state(self.session_dir)
@@ -177,6 +212,120 @@ class SessionCliTest(unittest.TestCase):
         status = self.run_cli("status", "--session", str(self.session_dir))
         self.assertIn('"assessment_mode": "executable"', status.stdout)
         self.assertIn(f'"workspace_root": "{REPO_ROOT}"', status.stdout)
+
+    def test_executable_task_loop_records_runtime_feedback(self):
+        self.advance_executable_to_phase_2()
+        self.run_cli(
+            "start-task",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "t01",
+            "--title",
+            "Broken task",
+            "--check-command",
+            "python3 -c 'print(\"fail\"); raise SystemExit(1)'",
+            "--text",
+            "Fix the broken fixture.",
+        )
+        self.run_cli(
+            "submit-artifact",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "t01",
+            "--text",
+            "diff --git a/a b/a",
+        )
+        result = self.run_cli(
+            "run-check",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "t01",
+        )
+        self.assertIn("Runtime Feedback: t01 round 1", result.stdout)
+        self.assertTrue(
+            (self.session_dir / "shared" / "runtime-feedback" / "t01" / "round1.md").exists()
+        )
+
+    def test_executable_next_suggests_run_check_after_submission(self):
+        self.advance_executable_to_phase_2()
+        self.run_cli(
+            "start-task",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "t01",
+            "--title",
+            "Broken task",
+            "--check-command",
+            "python3 -c 'raise SystemExit(1)'",
+            "--text",
+            "Fix the broken fixture.",
+        )
+        self.run_cli(
+            "submit-artifact",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "t01",
+            "--text",
+            "patch",
+        )
+        result = self.run_cli("next", "--session", str(self.session_dir))
+        self.assertIn("run-check", result.stdout)
+
+    def test_executable_feedback_remains_revealed_only_after_explicit_reveal(self):
+        self.advance_executable_to_phase_2()
+        self.run_cli(
+            "start-task",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "t01",
+            "--title",
+            "Broken task",
+            "--check-command",
+            "python3 -c 'print(0)'",
+            "--text",
+            "Fix the broken fixture.",
+        )
+        self.run_cli(
+            "submit-artifact",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "t01",
+            "--text",
+            "patch",
+        )
+        self.run_cli("run-check", "--session", str(self.session_dir), "--id", "t01")
+        self.run_cli(
+            "save-task-feedback",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "t01",
+            "--text",
+            "hint",
+        )
+        self.assertTrue(
+            (self.session_dir / "state" / "locked" / "feedback" / "t01" / "round1.md").exists()
+        )
+        self.assertFalse(
+            (self.session_dir / "coach" / "feedback" / "t01" / "round1.md").exists()
+        )
+        self.run_cli(
+            "reveal-task-feedback",
+            "--session",
+            str(self.session_dir),
+            "--id",
+            "t01",
+        )
+        self.assertTrue(
+            (self.session_dir / "coach" / "feedback" / "t01" / "round1.md").exists()
+        )
 
     def test_phase_artifact_requires_student_attempt(self):
         self.init_session()

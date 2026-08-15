@@ -114,6 +114,21 @@ python3 "$SKILL_DIR/scripts/session.py" reveal-feedback --session .rdm --id q01
 python3 "$SKILL_DIR/scripts/session.py" request-followup --session .rdm --id q01
 ```
 
+若 `assessment_mode=executable`，Phase 2 可以改成最小执行回路：
+
+```bash
+python3 "$SKILL_DIR/scripts/session.py" start-task --session .rdm --id t01 \
+  --title "修复失败测试" \
+  --check-command "pytest -q" \
+  --from-file shared/tasks/t01.md
+python3 "$SKILL_DIR/scripts/session.py" submit-artifact --session .rdm --id t01 \
+  --from-file student/artifacts/t01.diff
+python3 "$SKILL_DIR/scripts/session.py" run-check --session .rdm --id t01
+python3 "$SKILL_DIR/scripts/session.py" save-task-feedback --session .rdm --id t01 \
+  --from-file coach/feedback/t01.md
+python3 "$SKILL_DIR/scripts/session.py" reveal-task-feedback --session .rdm --id t01
+```
+
 ### Phase 3：边界探索与迁移验证
 
 让学生先完成反事实推演、跨领域迁移、最小可行解释和未知问题生成，再解锁教练对因果链条和迁移边界的检查。
@@ -141,6 +156,12 @@ python3 "$SKILL_DIR/scripts/session.py" export --session .rdm --output exports/r
 | `save-feedback` | 学生提交后保存教练反馈 |
 | `reveal-feedback` | 读取已解锁的教练反馈 |
 | `request-followup` | 在已 reveal 的反馈后开启下一轮追问 |
+| `start-task` | 创建 executable 模式下的 Phase 2 任务 |
+| `submit-artifact` | 提交 executable 模式下的学生产物 |
+| `run-check` | 运行 executable 模式下的即时环境检查 |
+| `save-task-feedback` | 保存 executable 任务的教练反馈 |
+| `reveal-task-feedback` | 读取 executable 任务已解锁的教练反馈 |
+| `request-task-followup` | 为 executable 任务开启下一轮 |
 | `finish-phase` | 校验并标记阶段完成 |
 | `export` | 导出学生成果和已解锁教练内容 |
 | `check` | 检查会话完整性 |
