@@ -1,4 +1,4 @@
 interface:
   display_name: "Rapid Domain Mastery"
   short_description: "Turn materials into tested mental models without fake learning."
-  default_prompt: "Use $rapid-domain-mastery to turn my materials into a four-phase mastery sprint with a coach/student barrier."
+  default_prompt: "Use $rapid-domain-mastery to turn my materials into a four-phase mastery sprint with a coach/student barrier. 用 rapid-domain-mastery，把我的材料做成带教练/学生隔断的四阶段掌握冲刺。"

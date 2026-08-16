@@ -76,10 +76,14 @@ session/
 
 ## 使用
 
-安装后，在 agent 里直接说：
+安装后，在 agent 里直接说（中英均可）：
 
 ```text
 Use rapid-domain-mastery to turn my materials into a four-phase mastery sprint with a coach/student barrier.
+```
+
+```text
+用 rapid-domain-mastery，把我的材料做成带教练/学生隔断的四阶段掌握冲刺。
 ```
 
 或在本仓库开发时，把 `$SKILL_DIR` 指向 skill 目录，手动驱动会话：
@@ -112,32 +116,47 @@ python3 skills/rapid-domain-mastery/scripts/session.py reveal-phase \
 
 ## 本地模拟：playground + user agent
 
-仓库维护者不该用自己当第一位学员。用 git 忽略的 `playground/` 搭一个**模拟用户**，让 user agent 扮演真实学习者，再调用 `rapid-domain-mastery` 当教练：
+仓库维护者不该用自己当第一位学员。用 git 忽略的 `playground/` 搭沙盒：
 
 ```bash
-python3 scripts/scaffold-playground.py
+# 重建文档/材料 + 空会话
+python3 scripts/scaffold-playground.py --force --reset
+
+# 无人值守：固定 fixture 走完 Phase 1–4，并断言隔断失败用例
+python3 scripts/run-playground-smoke.py
 ```
 
-这会创建（已被 `.gitignore` 忽略）：
+`playground/` **故意不进 git**。CI 仍然能跑通：提交的是 [`scripts/scaffold-playground.py`](scripts/scaffold-playground.py) 与 [`scripts/run-playground-smoke.py`](scripts/run-playground-smoke.py)；smoke 会在 runner 上当场创建 `playground/`（材料与 agent 文档嵌在 scaffold 脚本里），不依赖仓库里预先存在该目录。
+
+- **smoke**：验 `session.py` 协议与路径是否可跑通（不依赖 LLM）。
+- **dogfood**：验 agent 是否守住教练/学生隔断（双角色或严格分角色）。
+
+`playground/` 结构（忽略，不进 git）：
 
 ```text
 playground/
-  USER_AGENT.md       # 模拟用户的行为规范（给第二个 agent / 同一会话的学生角色）
+  USER_AGENT.md       # 模拟学员
+  COACH_AGENT.md      # 教练操作手册（路径与命令）
   materials/          # 最小多视角材料包
-  .rdm/               # 由 skill 初始化的会话（首次 scaffold 后需自行 init，或用 --init）
-  logs/               # 可选：模拟轮次记录
+  .rdm/               # 会话根（--reset / smoke 会重建）
+  exports/            # smoke / dogfood 导出
+  logs/               # 可选轮次记录
 ```
 
-带会话初始化：
+仅初始化会话：
 
 ```bash
 python3 scripts/scaffold-playground.py --init
+# 或清空后重建会话（保留材料与 agent 文档）
+python3 scripts/scaffold-playground.py --reset
 ```
 
 然后开两个角色（两个会话，或同一 agent 严格分角色）：
 
-1. **Coach agent**：加载 `rapid-domain-mastery`，只驱动教练侧与 `session.py`。
-2. **User agent**：只读 `playground/USER_AGENT.md`，只写 `student/` 与回答，绝不读 `coach/`。
+1. **Coach agent**：读 `playground/COACH_AGENT.md`，加载 `rapid-domain-mastery`，只驱动教练侧与 `session.py`。
+2. **User agent**：读 `playground/USER_AGENT.md`，只写 `playground/.rdm/student/`，绝不读 `coach/`。
+
+`--from-file` 相对**仓库根**，例如 `playground/.rdm/student/notes/phase1-draft.md`，不要写 `student/...`。
 
 ## 仓库结构
 
@@ -152,10 +171,12 @@ python3 scripts/scaffold-playground.py --init
 │           ├── phase-prompts.md
 │           └── separation-protocol.md
 ├── scripts/
-│   └── scaffold-playground.py
+│   ├── scaffold-playground.py
+│   └── run-playground-smoke.py
 ├── tests/
 │   ├── test_session.py
-│   └── test_skill_structure.py
+│   ├── test_skill_structure.py
+│   └── test_playground_smoke.py
 └── .github/workflows/ci.yml
 ```
 
@@ -171,11 +192,12 @@ python3 -m unittest discover -s tests -v
 
 GitHub Actions 在每次 push 和 pull request 时：
 
-- 运行单元测试；
+- 运行单元测试（含 `test_playground_smoke.py`）；
 - 编译 skill 脚本；
-- 对 `session.py` 做 CLI 冒烟测试。
+- 对 `session.py` 做 CLI 冒烟测试；
+- 运行 `scripts/run-playground-smoke.py` 端到端走完四阶段（CI 会先 `rm -rf playground`，证明不依赖已提交沙盒）。
 
-测试覆盖：目录隔离、阶段屏障、题目提交屏障、导出不泄漏锁定内容、会话完整性检查。
+测试覆盖：目录隔离、阶段屏障、题目提交屏障、导出不泄漏锁定内容、会话完整性检查、playground 端到端 smoke。
 
 ## 失效条件
 
@@ -185,9 +207,5 @@ GitHub Actions 在每次 push 和 pull request 时：
 - 学习者需要基础元认知，能判断 agent 输出是否合理。
 - 陈述性知识效果最好；数学证明、编程、实验技能必须配合动手练习。
 - 零基础者直接压缩时间可能陷入“框架幻觉”。
-
-## 原始方法拆解
-
-最初的 README 分析把案例拆成四个 agent 可执行阶段，核心 prompt 已迁移到 [phase-prompts.md](skills/rapid-domain-mastery/references/phase-prompts.md)，并由 [session.py](skills/rapid-domain-mastery/scripts/session.py) 增加状态机和隔断约束。
 
 一句话总结：用 AI 的认知压缩能力替代“熟悉”阶段，把人的认知资源集中到“理解”和“生成”阶段。

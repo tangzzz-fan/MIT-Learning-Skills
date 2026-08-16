@@ -28,3 +28,12 @@ jobs:
         run: |
           python skills/rapid-domain-mastery/scripts/session.py --help
           python skills/rapid-domain-mastery/scripts/session.py check --help
+
+      - name: Playground end-to-end smoke
+        # playground/ is gitignored; smoke must self-scaffold from scripts/.
+        run: |
+          rm -rf playground
+          test ! -e playground
+          python scripts/run-playground-smoke.py
+          test -d playground/.rdm
+          test -f playground/exports/smoke-export/state/session.json
