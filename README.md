@@ -4,7 +4,7 @@
 
 > 原案例的真实性无法验证。仓库关注的不是故事真伪，而是其中的生成式学习（Generative Learning）机制是否可以被工程化为一个可控 skill。
 
-[![skills.sh](https://skills.sh/b/tangzzz-fan/MIT-Learning-Skills)](https://skills.sh/tangzzz-fan/MIT-Learning-Skills)
+[![skills.sh](https://skills.sh/b/tangzzz-fan/mit-learning-skills)](https://skills.sh/tangzzz-fan/mit-learning-skills/rapid-domain-mastery)
 
 ## 安装（30 秒）
 
